@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         MES 鍗曠粍Push锛堝姩鎬丼N閲嶅缓绋冲畾鐗堬級
+// @name         MES 单组Push（动态SN重建稳定版）
 // @namespace    mes.plugin.push.dynamic
 // @version      3.0
 // @match        https://w3.huawei.com/mespmm/wipweb*
@@ -11,7 +11,7 @@
 (async function () {
   'use strict';
 
-  // ===== MES鎺堟潈闂ㄧ START =====
+  // ===== MES授权门禁 START =====
   async function __MES_AUTH_GATE__() {
     var KEY = 'MES_AUTH_CENTER_STATE_V1';
     var start = Date.now();
@@ -21,7 +21,7 @@
         var st = JSON.parse(localStorage.getItem(KEY) || 'null');
 
         if (st && st.ok && Date.now() - Number(st.ts || 0) < 10000) {
-          console.log('[MES鎺堟潈闂ㄧ] 宸叉巿鏉冿紝鑴氭湰缁х画杩愯锛?, st.jobNumber);
+          console.log('[MES授权门禁] 已授权，脚本继续运行：', st.jobNumber);
           return true;
         }
       } catch (e) {}
@@ -31,7 +31,7 @@
       });
     }
 
-    console.warn('[MES鎺堟潈闂ㄧ] 鏈巿鏉冿紝鑴氭湰宸插仠姝㈣繍琛?);
+    console.warn('[MES授权门禁] 未授权，脚本已停止运行');
     return false;
   }
 
@@ -52,17 +52,18 @@
     waitAllSn: false
   };
 
-  // 鍔犺浇淇濆瓨鐨勯厤缃?  let cfg = { ...defaultCfg };
+  // 加载保存的配置
+  let cfg = { ...defaultCfg };
   try {
     const saved = GM_getValue(KEY_CFG, null);
     if (saved) {
       cfg = { ...defaultCfg, ...JSON.parse(saved) };
     }
   } catch (e) {
-    console.log('[PUSH] 鍔犺浇閰嶇疆澶辫触锛屼娇鐢ㄩ粯璁ら厤缃?);
+    console.log('[PUSH] 加载配置失败，使用默认配置');
   }
 
-  // 鍔犺浇淇濆瓨鐨凷N閰嶇疆鍒楄〃
+  // 加载保存的SN配置列表
   let savedConfigs = [];
   try {
     const saved = GM_getValue(KEY_SAVED, null);
@@ -70,20 +71,23 @@
       savedConfigs = JSON.parse(saved);
     }
   } catch (e) {
-    console.log('[PUSH] 鍔犺浇淇濆瓨閰嶇疆鍒楄〃澶辫触');
+    console.log('[PUSH] 加载保存配置列表失败');
   }
 
   let lastSig = '';
   let lastBarcode = '';
 
-  // 鐖堕」鍙樺寲鏃堕棿锛岀敤浜庨槻姝㈡柊鐖堕」閰嶆棫SN
+  // 父项变化时间，用于防止新父项配旧SN
   let parentChangeAt = 0;
 
-  // 褰撳墠宸茶瘑鍒埗椤?  let lastParentSeen = '';
+  // 当前已识别父项
+  let lastParentSeen = '';
 
-  // 璁板綍姣忎釜SN妗嗘渶鍚庝竴娆″彉鍖栨椂闂?  const snTouchedAtById = new Map();
+  // 记录每个SN框最后一次变化时间
+  const snTouchedAtById = new Map();
 
-  // 鏃ュ織闃插埛灞?  const logThrottleMap = new Map();
+  // 日志防刷屏
+  const logThrottleMap = new Map();
   const LOG_THROTTLE_MS = 3000;
 
   function dlog(...args) {
@@ -93,9 +97,9 @@
   function saveConfig() {
     try {
       GM_setValue(KEY_CFG, JSON.stringify(cfg));
-      dlog('閰嶇疆宸蹭繚瀛?', cfg);
+      dlog('配置已保存:', cfg);
     } catch (e) {
-      console.log('[PUSH] 淇濆瓨閰嶇疆澶辫触:', e);
+      console.log('[PUSH] 保存配置失败:', e);
     }
   }
 
@@ -103,7 +107,7 @@
     try {
       GM_setValue(KEY_SAVED, JSON.stringify(savedConfigs));
     } catch (e) {
-      console.log('[PUSH] 淇濆瓨閰嶇疆鍒楄〃澶辫触:', e);
+      console.log('[PUSH] 保存配置列表失败:', e);
     }
   }
 
@@ -122,7 +126,8 @@
 
     box.value = text + '\n' + box.value;
 
-    // 鎺у埗鏃ュ織闀垮害锛岄伩鍏嶅お闀?    if (box.value.length > 8000) {
+    // 控制日志长度，避免太长
+    if (box.value.length > 8000) {
       box.value = box.value.slice(0, 8000);
     }
   }
@@ -136,7 +141,7 @@
 
   function normalize(v) {
     v = (v || '').trim().replace(/\u00A0/g, ' ').replace(/\s+/g, '');
-    if (v.indexOf('锛?) >= 0) v = v.split('锛?).pop();
+    if (v.indexOf('：') >= 0) v = v.split('：').pop();
     if (v.indexOf(':') >= 0) v = v.split(':').pop();
     return v.toUpperCase();
   }
@@ -213,7 +218,7 @@
     for (const el of all) {
       const box = el.closest('div[id^="Input_"]');
       const ctx = ((box?.parentElement?.innerText || box?.innerText || '')).replace(/\s+/g, '');
-      if (ctx.includes('鏉＄爜閲囬泦')) return el;
+      if (ctx.includes('条码采集')) return el;
     }
 
     return all[0] || null;
@@ -237,7 +242,8 @@
 
     if (!barcode || !nums.length) return null;
 
-    // 濡傛灉寮€鍚簡绛夊緟鍏ㄩ儴SN锛屾鏌ユ墍鏈塖N妗嗘槸鍚﹂兘鏈夋暟鎹?    if (cfg.waitAllSn) {
+    // 如果开启了等待全部SN，检查所有SN框是否都有数据
+    if (cfg.waitAllSn) {
       if (!getAllSnFilled()) {
         return null;
       }
@@ -281,9 +287,9 @@
 
     if (!lines) {
       if (cfg.waitAllSn) {
-        setMsg('绛夊緟鍏ㄩ儴SN濉啓瀹屾垚');
+        setMsg('等待全部SN填写完成');
       } else {
-        setMsg('鏉＄爜/SN涓嶅畬鏁?);
+        setMsg('条码/SN不完整');
       }
       return;
     }
@@ -291,13 +297,13 @@
     const currentBarcode = getBarcode();
 
     if (!currentBarcode || currentBarcode !== lastParentSeen) {
-      setMsg('鐖堕」鏈壂鐮佺‘璁?);
+      setMsg('父项未扫码确认');
       return;
     }
 
     if (!allSnNoDuplicate()) {
-      appendDataLog('SN閲嶅锛屾湭鎻愪氦');
-      setMsg('SN閲嶅锛屾湭鎻愪氦');
+      appendDataLog('SN重复，未提交');
+      setMsg('SN重复，未提交');
       return;
     }
 
@@ -305,25 +311,25 @@
       const gate = readBomGate();
 
       if (!gate || !gate.ts || Date.now() - gate.ts > 120000) {
-        setMsg('绛夊緟鏍￠獙');
+        setMsg('等待校验');
         return;
       }
 
       if (parentChangeAt && gate.ts < parentChangeAt) {
-        setMsg('绛夊緟鏍￠獙');
+        setMsg('等待校验');
         return;
       }
 
       if (!Array.isArray(gate.details)) {
-        setMsg('绛夊緟鏍￠獙');
+        setMsg('等待校验');
         return;
       }
 
       const nums = parseSnNums(cfg.snListText);
 
       if (!nums.length) {
-        appendDataLog('鏈厤缃甋N搴忓彿');
-        setMsg('鏈厤缃甋N搴忓彿');
+        appendDataLog('未配置SN序号');
+        setMsg('未配置SN序号');
         return;
       }
 
@@ -333,67 +339,67 @@
         const val = normalize(el && el.value || '');
 
         if (!el) {
-          appendDataLog('鏈壘鍒伴厤缃甋N妗?' + id);
-          setMsg('鏈壘鍒伴厤缃甋N妗?' + id);
+          appendDataLog('未找到配置SN框 ' + id);
+          setMsg('未找到配置SN框 ' + id);
           return;
         }
 
         if (!val) {
-          setMsg('閰嶇疆SN鏈～鍐?' + id);
+          setMsg('配置SN未填写 ' + id);
           return;
         }
 
         const touchedAt = snTouchedAtById.get(id) || 0;
 
         if (parentChangeAt && touchedAt < parentChangeAt) {
-          setMsg('閰嶇疆SN鏈埛鏂?' + id);
+          setMsg('配置SN未刷新 ' + id);
           return;
         }
 
         const d = gate.details.find(x => x && x.id === id);
 
         if (!d) {
-          setMsg('绛夊緟鏍￠獙');
+          setMsg('等待校验');
           return;
         }
 
         if (normalize(d.sn || '') !== val) {
-          setMsg('绛夊緟鏍￠獙');
+          setMsg('等待校验');
           return;
         }
 
         if (d.status !== 'ok') {
-          setMsg('绛夊緟鏍￠獙');
+          setMsg('等待校验');
           return;
         }
       }
 
     } catch (e) {
-      setMsg('绛夊緟鏍￠獙');
+      setMsg('等待校验');
       return;
     }
 
     const sig = lines.join('|');
 
-    // 鎵嬪姩Push涓嶅彈lastSig鍘婚噸闄愬埗
+    // 手动Push不受lastSig去重限制
     if (!force && sig === lastSig) return;
 
     if (!force) {
       lastSig = sig;
     }
 
-    appendDataLog('鎶撳彇瀹屾垚: ' + lines.join(' | '), true);
+    appendDataLog('抓取完成: ' + lines.join(' | '), true);
 
     try {
       const ret = await pushToLocal(lines);
 
-      appendDataLog('Push瀹屾垚: ' + (ret.count || lines.length) + ' 鏉?, true);
-      setMsg('宸睵ush ' + (ret.count || lines.length));
+      appendDataLog('Push完成: ' + (ret.count || lines.length) + ' 条', true);
+      setMsg('已Push ' + (ret.count || lines.length));
 
       dlog('push ok', lines);
     } catch (e) {
-      appendDataLog('Push澶辫触: ' + e, true);
-      setMsg('Push澶辫触');
+      appendDataLog('Push失败: ' + e, true);
+      setMsg('Push失败');
 
       dlog('push fail', e);
     }
@@ -444,8 +450,8 @@
 
       clearTimeout(pushTimer);
 
-      setMsg('鐖堕」宸叉壂鐮侊紝绛夊緟閰嶇疆SN鏍￠獙');
-      appendDataLog('鐖堕」鍙樺寲: ' + b + '锛岀瓑寰呴厤缃甋N鏍￠獙');
+      setMsg('父项已扫码，等待配置SN校验');
+      appendDataLog('父项变化: ' + b + '，等待配置SN校验');
 
       dlog('parent changed by scanner enter:', b);
 
@@ -479,41 +485,42 @@
       const barcode = getBarcode();
 
       if (!barcode) {
-        return { ok: false, msg: '鐖堕」鏉＄爜涓虹┖' };
+        return { ok: false, msg: '父项条码为空' };
       }
 
       if (barcode !== lastParentSeen) {
-        return { ok: false, msg: '鐖堕」鏈壂鐮佺‘璁わ紝璇烽噸鏂版壂鐮? };
+        return { ok: false, msg: '父项未扫码确认，请重新扫码' };
       }
 
       const nums = parseSnNums(cfg.snListText);
 
       if (!nums.length) {
-        return { ok: false, msg: '鏈厤缃甋N搴忓彿' };
+        return { ok: false, msg: '未配置SN序号' };
       }
 
       if (!allSnNoDuplicate()) {
-        return { ok: false, msg: 'SN閲嶅锛屾湭Push' };
+        return { ok: false, msg: 'SN重复，未Push' };
       }
 
-      // 濡傛灉寮€鍚簡绛夊緟鍏ㄩ儴SN锛屾鏌ユ墍鏈塖N妗?      if (cfg.waitAllSn) {
+      // 如果开启了等待全部SN，检查所有SN框
+      if (cfg.waitAllSn) {
         if (!getAllSnFilled()) {
-          return { ok: false, msg: '绛夊緟鍏ㄩ儴SN濉啓' };
+          return { ok: false, msg: '等待全部SN填写' };
         }
       }
 
       const gate = readBomGate();
 
       if (!gate || !gate.ts || Date.now() - gate.ts > 120000) {
-        return { ok: false, msg: '绛夊緟鏍￠獙' };
+        return { ok: false, msg: '等待校验' };
       }
 
       if (parentChangeAt && gate.ts < parentChangeAt) {
-        return { ok: false, msg: '绛夊緟鏍￠獙' };
+        return { ok: false, msg: '等待校验' };
       }
 
       if (!Array.isArray(gate.details)) {
-        return { ok: false, msg: '绛夊緟鏍￠獙' };
+        return { ok: false, msg: '等待校验' };
       }
 
       markConfiguredOkFromGate(gate);
@@ -523,19 +530,19 @@
         const el = document.getElementById(id);
 
         if (!el) {
-          return { ok: false, msg: '鏈壘鍒伴厤缃甋N妗?' + id };
+          return { ok: false, msg: '未找到配置SN框 ' + id };
         }
 
         const val = normalize(el.value || '');
 
         if (!val) {
-          return { ok: false, msg: '閰嶇疆SN鏈～鍐?' + id };
+          return { ok: false, msg: '配置SN未填写 ' + id };
         }
 
         const touchedAt = snTouchedAtById.get(id) || 0;
 
         if (parentChangeAt && touchedAt < parentChangeAt) {
-          return { ok: false, msg: '閰嶇疆SN鏈埛鏂?' + id };
+          return { ok: false, msg: '配置SN未刷新 ' + id };
         }
 
         const d = gate.details.find(x => x && x.id === id);
@@ -546,31 +553,31 @@
             el.dispatchEvent(new Event('change', { bubbles: true }));
           } catch (e) {}
 
-          return { ok: false, msg: '绛夊緟鏍￠獙' };
+          return { ok: false, msg: '等待校验' };
         }
 
         if (normalize(d.sn || '') !== val) {
-          return { ok: false, msg: '绛夊緟鏍￠獙' };
+          return { ok: false, msg: '等待校验' };
         }
 
         if (d.status !== 'ok') {
-          return { ok: false, msg: '绛夊緟鏍￠獙' };
+          return { ok: false, msg: '等待校验' };
         }
       }
 
-      return { ok: true, msg: '閰嶇疆SN宸叉牎楠岄€氳繃' };
+      return { ok: true, msg: '配置SN已校验通过' };
     }
 
     function tryAutoPushByConfiguredSn() {
       if (!cfg.autoPush) return;
 
       if (anySnRouteMoving()) {
-        setMsg('SN褰掍綅涓紝绛夊緟Push');
+        setMsg('SN归位中，等待Push');
         return;
       }
 
       if (!allSnNoDuplicate()) {
-        setMsg('SN閲嶅锛屾湭Push');
+        setMsg('SN重复，未Push');
         return;
       }
 
@@ -584,7 +591,7 @@
       clearTimeout(pushTimer);
 
       pushTimer = setTimeout(function () {
-        doPush(false);  // 鑷姩Push鍙條astSig鍘婚噸闄愬埗
+        doPush(false);  // 自动Push受lastSig去重限制
       }, 300);
     }
 
@@ -617,7 +624,7 @@
       }
 
       if (isBarcodeTarget(t)) {
-        setMsg('鐖堕」杈撳叆涓紝绛夊緟鎵爜鏋狤nter');
+        setMsg('父项输入中，等待扫码枪Enter');
       }
     }, true);
 
@@ -720,8 +727,8 @@
       user-select: none;
     `;
 
-    // 鐢熸垚涓嬫媺閫夐」HTML
-    let optionsHtml = '<option value="">鎵嬪姩杈撳叆</option>';
+    // 生成下拉选项HTML
+    let optionsHtml = '<option value="">手动输入</option>';
     for (const saved of savedConfigs) {
       const selected = saved === cfg.snListText ? 'selected' : '';
       optionsHtml += `<option value="${saved}" ${selected}>${saved}</option>`;
@@ -739,7 +746,7 @@
       ">
         <span>MES Push</span>
         <span id="og-mini" style="cursor:pointer;color:#666;font-weight:normal;">
-          ${collapsed ? '灞曞紑' : '鏀惰捣'}
+          ${collapsed ? '展开' : '收起'}
         </span>
       </div>
 
@@ -751,11 +758,11 @@
           line-height:16px;
           min-height:16px;
           user-select:text;
-        ">鎻掍欢宸插姞杞?/div>
+        ">插件已加载</div>
 
         <div style="margin-bottom:6px;">
           <div style="margin-bottom:3px;">
-            SN閰嶇疆:
+            SN配置:
             <select id="og-sn-select" style="
               width:130px;
               height:22px;
@@ -772,25 +779,25 @@
               box-sizing:border-box;
               flex:1;
             ">
-            <button id="og-save-btn" style="font-size:11px;height:22px;padding:0 6px;">淇濆瓨</button>
-            <button id="og-del-btn" style="font-size:11px;height:22px;padding:0 6px;">鍒犻櫎</button>
+            <button id="og-save-btn" style="font-size:11px;height:22px;padding:0 6px;">保存</button>
+            <button id="og-del-btn" style="font-size:11px;height:22px;padding:0 6px;">删除</button>
           </div>
         </div>
 
         <div style="margin-bottom:6px;display:flex;align-items:center;gap:8px;">
           <label>
             <input id="og-auto" type="checkbox" ${cfg.autoPush ? 'checked' : ''}>
-            鑷姩
+            自动
           </label>
           <label>
             <input id="og-wait-all" type="checkbox" ${cfg.waitAllSn ? 'checked' : ''}>
-            绛夊緟鍏ㄩ儴SN
+            等待全部SN
           </label>
         </div>
 
         <div style="margin-bottom:6px;">
           <button id="og-push-btn" style="font-size:12px;height:23px;">Push</button>
-          <button id="og-health-btn" style="font-size:12px;height:23px;">妫€娴?/button>
+          <button id="og-health-btn" style="font-size:12px;height:23px;">检测</button>
         </div>
 
         <textarea id="og-log" readonly style="
@@ -848,12 +855,12 @@
       });
     }
 
-    // 鍒锋柊涓嬫媺鍒楄〃
+    // 刷新下拉列表
     function refreshSelect() {
       const select = document.getElementById('og-sn-select');
       if (!select) return;
 
-      let html = '<option value="">鎵嬪姩杈撳叆</option>';
+      let html = '<option value="">手动输入</option>';
       for (const saved of savedConfigs) {
         const selected = saved === cfg.snListText ? 'selected' : '';
         html += `<option value="${saved}" ${selected}>${saved}</option>`;
@@ -861,7 +868,7 @@
       select.innerHTML = html;
     }
 
-    // 鎷栧姩
+    // 拖动
     (function bindDrag() {
       const title = document.getElementById('og-title');
 
@@ -909,27 +916,29 @@
       });
     })();
 
-    // SN杈撳叆妗嗗彉鏇?- 绔嬪嵆淇濆瓨
+    // SN输入框变更 - 立即保存
     document.getElementById('og-sn-list').addEventListener('change', function () {
       cfg.snListText = this.value || '';
       saveConfig();
-      setMsg('SN搴忓彿宸叉洿鏂?);
+      setMsg('SN序号已更新');
     });
 
-    // 涓嬫媺閫夋嫨鍙樻洿 - 绔嬪嵆鐢熸晥骞朵繚瀛?    document.getElementById('og-sn-select').addEventListener('change', function () {
+    // 下拉选择变更 - 立即生效并保存
+    document.getElementById('og-sn-select').addEventListener('change', function () {
       const val = this.value;
       if (val) {
         cfg.snListText = val;
         document.getElementById('og-sn-list').value = val;
         saveConfig();
-        setMsg('宸查€夋嫨: ' + val);
+        setMsg('已选择: ' + val);
       }
     });
 
-    // 淇濆瓨褰撳墠閰嶇疆鍒颁笅鎷夊垪琛?    document.getElementById('og-save-btn').addEventListener('click', function () {
+    // 保存当前配置到下拉列表
+    document.getElementById('og-save-btn').addEventListener('click', function () {
       const val = cfg.snListText.trim();
       if (!val) {
-        setMsg('璇疯緭鍏N搴忓彿');
+        setMsg('请输入SN序号');
         return;
       }
 
@@ -939,17 +948,17 @@
         saveSavedConfigs();
         refreshSelect();
         document.getElementById('og-sn-select').value = val;
-        setMsg('宸蹭繚瀛? ' + val);
+        setMsg('已保存: ' + val);
       } else {
-        setMsg('宸插瓨鍦? ' + val);
+        setMsg('已存在: ' + val);
       }
     });
 
-    // 鍒犻櫎褰撳墠閰嶇疆
+    // 删除当前配置
     document.getElementById('og-del-btn').addEventListener('click', function () {
       const val = cfg.snListText.trim();
       if (!val) {
-        setMsg('璇疯緭鍏ヨ鍒犻櫎鐨凷N搴忓彿');
+        setMsg('请输入要删除的SN序号');
         return;
       }
 
@@ -959,38 +968,41 @@
         saveSavedConfigs();
         refreshSelect();
         document.getElementById('og-sn-select').value = '';
-        setMsg('宸插垹闄? ' + val);
+        setMsg('已删除: ' + val);
       } else {
-        setMsg('鏈壘鍒? ' + val);
+        setMsg('未找到: ' + val);
       }
     });
 
-    // 鑷姩寮€鍏?- 绔嬪嵆鐢熸晥骞朵繚瀛?    document.getElementById('og-auto').addEventListener('change', function () {
+    // 自动开关 - 立即生效并保存
+    document.getElementById('og-auto').addEventListener('change', function () {
       cfg.autoPush = this.checked;
       saveConfig();
-      setMsg(cfg.autoPush ? '鑷姩Push宸插紑鍚? : '鑷姩Push宸插叧闂?);
-      dlog('鑷姩Push:', cfg.autoPush);
+      setMsg(cfg.autoPush ? '自动Push已开启' : '自动Push已关闭');
+      dlog('自动Push:', cfg.autoPush);
     });
 
-    // 绛夊緟鍏ㄩ儴SN寮€鍏?- 绔嬪嵆鐢熸晥骞朵繚瀛?    document.getElementById('og-wait-all').addEventListener('change', function () {
+    // 等待全部SN开关 - 立即生效并保存
+    document.getElementById('og-wait-all').addEventListener('change', function () {
       cfg.waitAllSn = this.checked;
       saveConfig();
-      setMsg(cfg.waitAllSn ? '绛夊緟鍏ㄩ儴SN宸插紑鍚? : '绛夊緟鍏ㄩ儴SN宸插叧闂?);
-      dlog('绛夊緟鍏ㄩ儴SN:', cfg.waitAllSn);
+      setMsg(cfg.waitAllSn ? '等待全部SN已开启' : '等待全部SN已关闭');
+      dlog('等待全部SN:', cfg.waitAllSn);
     });
 
-    // Push鎸夐挳 - 鍙互閲嶅鎻愪氦
+    // Push按钮 - 可以重复提交
     document.getElementById('og-push-btn').addEventListener('click', function () {
-      doPush(true);  // force=true锛屽彲浠ラ噸澶嶆彁浜?    });
+      doPush(true);  // force=true，可以重复提交
+    });
 
     document.getElementById('og-health-btn').addEventListener('click', async function () {
       try {
         const ret = await healthCheck();
-        appendDataLog('鏈嶅姟姝ｅ父: ' + JSON.stringify(ret), true);
-        setMsg('鏈嶅姟姝ｅ父');
+        appendDataLog('服务正常: ' + JSON.stringify(ret), true);
+        setMsg('服务正常');
       } catch (e) {
-        appendDataLog('鏈嶅姟寮傚父: ' + e, true);
-        setMsg('鏈嶅姟寮傚父');
+        appendDataLog('服务异常: ' + e, true);
+        setMsg('服务异常');
       }
     });
 
@@ -1000,11 +1012,11 @@
 
       if (body.style.display === 'none') {
         body.style.display = '';
-        this.textContent = '鏀惰捣';
+        this.textContent = '收起';
         panel.style.width = '280px';
       } else {
         body.style.display = 'none';
-        this.textContent = '灞曞紑';
+        this.textContent = '展开';
         panel.style.width = '90px';
       }
 
