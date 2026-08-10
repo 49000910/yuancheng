@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         MES 鍘熻〃鏍煎彔鍔犳樉绀鸿秴杩?00鏉?// @namespace    mes.inline.stack.grid
+// @name         MES 原表格叠加显示超过100条
+// @namespace    mes.inline.stack.grid
 // @version      2.0
-// @description  MES鏉＄爜閲囬泦琛ㄦ牸鍙犲姞锛屾帓闄ゆ壒閲忚剼鏈骇鐢熺殑鏁版嵁锛岀簿鍑嗙粺璁′汉宸ユ晥鑳斤紝姘镐箙璁板繂璁剧疆
+// @description  MES条码采集表格叠加，排除批量脚本产生的数据，精准统计人工效能，永久记忆设置
 // @match        https://w3.huawei.com/mespmm/wipweb*
 // @run-at       document-idle
 // @grant        none
@@ -10,7 +11,7 @@
 (async function () {
   'use strict';
 
-  // ===== MES鎺堟潈闂ㄧ START =====
+  // ===== MES授权门禁 START =====
   async function __MES_AUTH_GATE__() {
     var KEY = 'MES_AUTH_CENTER_STATE_V1';
     var start = Date.now();
@@ -27,7 +28,7 @@
   }
 
   if (!(await __MES_AUTH_GATE__())) return;
-  // ===== MES鎺堟潈闂ㄧ END =====
+  // ===== MES授权门禁 END =====
 
 
   const ROUTE_KEY = '#/ProductTrackInOut';
@@ -36,7 +37,7 @@
   const RENUMBER_SEQ = true;
   const CHECK_INTERVAL = 800;
 
-  // ===== 缁熶竴鐨勬湰鍦拌缃繚瀛樹笌璇诲彇 =====
+  // ===== 统一的本地设置保存与读取 =====
   const SETTINGS_KEY = 'MES_INLINE_GRID_SETTINGS_V1';
   const defaultSettings = { heightOffset: 510, onlyUnique: false, groupSize: 0 };
 
@@ -69,11 +70,11 @@
 
   const softColors = ['#d4e6fc', '#fdf2cf', '#d8efd1'];
 
-  // ========= UPH 鎸夊皬鏃剁粺璁?=========
+  // ========= UPH 按小时统计 =========
   let currentHourKey = new Date().getHours();
   let hourSet = new Set();
 
-  function log(...args) { console.log('[MES鍘熻〃鏍煎彔鍔燷', ...args); }
+  function log(...args) { console.log('[MES原表格叠加]', ...args); }
   function isTargetRoute() { return location.href.includes(ROUTE_KEY); }
   function getGrid() { return document.querySelector(GRID_SELECTOR) || document.querySelector('.hae-grid'); }
   function getTbody() { return getGrid() && getGrid().querySelector('.grid-body-content'); }
@@ -161,15 +162,16 @@
   }
 
   function trackUPH(newRows) {
-    // 銆愭牳蹇冧慨鏀广€戯細璇诲彇銆婁竴浣撳寲鑴氭湰銆嬫湁娌℃湁鐣欎笅姝ｅ湪鎵硅窇鐨勬殫鍙?    const isBatchRunning = localStorage.getItem('MES_BATCH_RUNNING_FLAG') === '1';
+    // 【核心修改】：读取《一体化脚本》有没有留下正在批跑的暗号
+    const isBatchRunning = localStorage.getItem('MES_BATCH_RUNNING_FLAG') === '1';
 
     newRows.forEach(r => {
       if (r.data.sn) {
-        // 鍙湁銆愪笉鏄€戞壒閲忚剼鏈窇鐨勬暟鎹紝鎵嶄細璁″叆浜哄伐鏁堣兘缁熻
+        // 只有【不是】批量脚本跑的数据，才会计入人工效能统计
         if (!isBatchRunning) {
           hourSet.add(r.data.sn);
         } else {
-          log('妫€娴嬪埌鏉＄爜 [', r.data.sn, '] 鏉ヨ嚜鎵归噺鑴氭湰锛屼笉璁″叆鏁堣兘UPH');
+          log('检测到条码 [', r.data.sn, '] 来自批量脚本，不计入效能UPH');
         }
       }
     });
@@ -256,14 +258,14 @@
     const timeRange = `${String(h).padStart(2, '0')}:00-${String((h + 1) % 24).padStart(2, '0')}:00`;
 
     badge.innerHTML = `
-      <span>鍙犲姞:<b id="mes-inline-stack-count" style="color:#1890ff;">0</b></span><span style="color:#d9d9d9;">|</span>
-      <span>鏁堣兘(<span id="mes-uph-range">${timeRange}</span>):<b id="mes-inline-stack-uph" style="color:#d4380d;">0</b></span><span style="color:#d9d9d9;">|</span>
-      <label style="display:inline-flex; align-items:center;">缁?<input type="number" id="mes-inline-stack-group" value="${groupSize}" min="0" max="100" style="width:32px; text-align:center; margin:0 2px; border:1px solid #ccc;"></label><span style="color:#d9d9d9;">|</span>
-      <label><input type="checkbox" id="mes-inline-stack-unique" style="vertical-align:middle;">鍘婚噸</label><span style="color:#d9d9d9;">|</span>
-      <label style="display:inline-flex; align-items:center;">楂?<input type="range" id="mes-height-slider" min="50" max="800" value="${heightOffset}" style="width:60px; margin:0 4px; cursor:pointer;"></label><span style="color:#d9d9d9;">|</span>
-      <button id="mes-inline-stack-reset" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">閲嶇疆</button>
-      <button id="mes-inline-stack-stop" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">鍋滄</button>
-      <button id="mes-inline-stack-hide" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">闅愯棌</button>
+      <span>叠加:<b id="mes-inline-stack-count" style="color:#1890ff;">0</b></span><span style="color:#d9d9d9;">|</span>
+      <span>效能(<span id="mes-uph-range">${timeRange}</span>):<b id="mes-inline-stack-uph" style="color:#d4380d;">0</b></span><span style="color:#d9d9d9;">|</span>
+      <label style="display:inline-flex; align-items:center;">组:<input type="number" id="mes-inline-stack-group" value="${groupSize}" min="0" max="100" style="width:32px; text-align:center; margin:0 2px; border:1px solid #ccc;"></label><span style="color:#d9d9d9;">|</span>
+      <label><input type="checkbox" id="mes-inline-stack-unique" style="vertical-align:middle;">去重</label><span style="color:#d9d9d9;">|</span>
+      <label style="display:inline-flex; align-items:center;">高:<input type="range" id="mes-height-slider" min="50" max="800" value="${heightOffset}" style="width:60px; margin:0 4px; cursor:pointer;"></label><span style="color:#d9d9d9;">|</span>
+      <button id="mes-inline-stack-reset" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">重置</button>
+      <button id="mes-inline-stack-stop" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">停止</button>
+      <button id="mes-inline-stack-hide" style="font-size:12px; height:20px; padding:0 4px; cursor:pointer; border:1px solid #ccc; background:#fff; border-radius:3px;">隐藏</button>
     `;
     head.insertBefore(badge, head.firstChild);
 
