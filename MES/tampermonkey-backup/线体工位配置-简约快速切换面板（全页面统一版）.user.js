@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         绾夸綋宸ヤ綅閰嶇疆-绠€绾﹀揩閫熷垏鎹㈤潰鏉匡紙鍏ㄩ〉闈㈢粺涓€鐗堬級
+// @name         线体工位配置-简约快速切换面板（全页面统一版）
 // @namespace    tm-line-station-panel-unified
 // @version      2.3.1
-// @description  鏀寔鍚屽悕绾夸綋閫夋嫨绗嚑涓紝鏍煎紡锛氱嚎浣撳悕|2 琛ㄧず閫夌浜屼釜
+// @description  支持同名线体选择第几个，格式：线体名|2 表示选第二个
 // @match        https://w3.huawei.com/mespmm/wipweb*
 // @grant        none
 // ==/UserScript==
@@ -10,7 +10,7 @@
 (async function () {
   'use strict';
 
-  // ===== MES鎺堟潈闂ㄧ START =====
+  // ===== MES授权门禁 START =====
   async function __MES_AUTH_GATE__() {
     var KEY = 'MES_AUTH_CENTER_STATE_V1';
     var start = Date.now();
@@ -20,7 +20,7 @@
         var st = JSON.parse(localStorage.getItem(KEY) || 'null');
 
         if (st && st.ok && Date.now() - Number(st.ts || 0) < 10000) {
-          console.log('[MES鎺堟潈闂ㄧ] 宸叉巿鏉冿紝鑴氭湰缁х画杩愯锛?, st.jobNumber);
+          console.log('[MES授权门禁] 已授权，脚本继续运行：', st.jobNumber);
           return true;
         }
       } catch (e) {}
@@ -30,20 +30,20 @@
       });
     }
 
-    console.warn('[MES鎺堟潈闂ㄧ] 鏈巿鏉冿紝鑴氭湰宸插仠姝㈣繍琛?);
+    console.warn('[MES授权门禁] 未授权，脚本已停止运行');
     return false;
   }
 
   if (!(await __MES_AUTH_GATE__())) return;
-  // ===== MES鎺堟潈闂ㄧ END =====
+  // ===== MES授权门禁 END =====
 
   const STORE_KEY = '__tm_line_station_presets_unified__';
-  const OPEN_TEXT = '绾夸綋宸ヤ綅閰嶇疆';
-  const SAVE_TEXT = '淇濆瓨';
+  const OPEN_TEXT = '线体工位配置';
+  const SAVE_TEXT = '保存';
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // ===== 鍩虹 =====
+  // ===== 基础 =====
   function isVisible(el) {
     if (!el) return false;
     const s = getComputedStyle(el);
@@ -54,7 +54,7 @@
     return (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
   }
   function norm(s) {
-    return String(s || '').replace(/\s+/g, '').replace(/[锛縚锛?]/g, '').toLowerCase();
+    return String(s || '').replace(/\s+/g, '').replace(/[＿_－-]/g, '').toLowerCase();
   }
   function click(el) {
     if (!el) return false;
@@ -83,7 +83,7 @@
     return null;
   }
 
-  // ===== 绛夊緟缂撳啿 =====
+  // ===== 等待缓冲 =====
   function hasLoading() {
     const sels = ['.loading', '.is-loading', '.hae-loading', '.el-loading-mask', '[class*="loading"]', '[class*="spinner"]'];
     for (const s of sels) if ([...document.querySelectorAll(s)].find(isVisible)) return true;
@@ -116,7 +116,7 @@
     return false;
   }
 
-  // ===== 鍏ㄩ〉闈㈢粺涓€瀹氫綅 =====
+  // ===== 全页面统一定位 =====
 function getActiveTabScope() {
   const activeTab = document.querySelector('.hae-tabs__item.is-active[aria-controls]');
   if (activeTab) {
@@ -150,7 +150,7 @@ function getLineInputNow() {
   });
   if (!all.length) return null;
 
-  const p = all.find(el => (el.placeholder || '').includes('璇烽€夋嫨'));
+  const p = all.find(el => (el.placeholder || '').includes('请选择'));
   if (p) return p;
 
   all.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
@@ -178,7 +178,7 @@ function getStationInputByRelative() {
   return best;
 }
 
-  // ===== 鍊欓€夐」 =====
+  // ===== 候选项 =====
   function getVisibleOptions() {
     const selectors = ['li.list-item', '.selector-poplist li', '.hae-dropdown-menu li', '.hae-select-dropdown li', '.hae-dropdown li', '[role="option"]', 'li'];
     const all = selectors.flatMap(s => [...document.querySelectorAll(s)]);
@@ -188,27 +188,29 @@ function getStationInputByRelative() {
     const k = norm(keyword);
     const list = getVisibleOptions();
 
-    // 鎵惧嚭鎵€鏈夊尮閰嶇殑閫夐」
+    // 找出所有匹配的选项
     var matches = list.filter(function(el) {
       return norm(textOf(el)).includes(k);
     });
 
-    // 鎸夋枃鏈帓搴忥紝淇濊瘉椤哄簭涓€鑷?    matches.sort(function(a, b) {
+    // 按文本排序，保证顺序一致
+    matches.sort(function(a, b) {
       return norm(textOf(a)).localeCompare(norm(textOf(b)));
     });
 
-    // 閫夋嫨绗嚑涓?    if (matches.length >= selectIndex) {
+    // 选择第几个
+    if (matches.length >= selectIndex) {
       return matches[selectIndex - 1];
     }
 
     return null;
   }
 
-  // ===== 杈撳叆閫夋嫨锛堟敮鎸侀€夋嫨绗嚑涓級=====
+  // ===== 输入选择（支持选择第几个）=====
   async function chooseByInput(input, keyword) {
-    if (!input) throw new Error('杈撳叆妗嗕笉瀛樺湪');
+    if (!input) throw new Error('输入框不存在');
 
-    // 瑙ｆ瀽 keyword锛屾敮鎸?"绾夸綋鍚峾2" 鏍煎紡
+    // 解析 keyword，支持 "线体名|2" 格式
     var parts = keyword.split('|');
     var realKeyword = parts[0];
     var selectIndex = parseInt(parts[1]) || 1;
@@ -235,30 +237,30 @@ function getStationInputByRelative() {
       return;
     }
 
-    // 鍊欓€夋湭鍛戒腑浣嗗€煎凡鍐欏叆 -> 缁х画
+    // 候选未命中但值已写入 -> 继续
     const cur = norm(input.value), tar = norm(realKeyword);
     if (cur && (cur === tar || cur.includes(tar) || tar.includes(cur))) return;
 
-    throw new Error('鍊欓€夋湭鍛戒腑锛? + realKeyword + ' (绗? + selectIndex + '涓?');
+    throw new Error('候选未命中：' + realKeyword + ' (第' + selectIndex + '个)');
   }
 
   async function applyPreset(lineText, stationText) {
       await sleep(250);
 
     const lineInput = await waitFor(() => getLineInputNow(), 7000, 120);
-    if (!lineInput) throw new Error('鏈壘鍒扮嚎浣撹緭鍏ユ');
+    if (!lineInput) throw new Error('未找到线体输入框');
     await chooseByInput(lineInput, lineText);
 
     const stationInput = await waitFor(() => getStationInputByRelative(), 6000, 120);
-    if (!stationInput) throw new Error('鏈壘鍒板伐浣嶈緭鍏ユ');
+    if (!stationInput) throw new Error('未找到工位输入框');
     await chooseByInput(stationInput, stationText);
 
     const saveBtn = findButtonsByText(SAVE_TEXT, document)[0];
-    if (!saveBtn) throw new Error('鏈壘鍒颁繚瀛樻寜閽?);
+    if (!saveBtn) throw new Error('未找到保存按钮');
     click(saveBtn);
   }
 
-  // ===== 鏁版嵁 =====
+  // ===== 数据 =====
   let presets = loadPresets();
   function loadPresets() {
     try {
@@ -300,7 +302,7 @@ function getStationInputByRelative() {
     panel.style.display = 'block';
     renderList();
     renderDeleteList();
-    setStatus('鐐瑰嚮浠绘剰閰嶇疆鍗冲彲鍒囨崲');
+    setStatus('点击任意配置即可切换');
   }
   function hidePanel() {
     if (panel) panel.style.display = 'none';
@@ -311,7 +313,7 @@ function getStationInputByRelative() {
     if (!presets.length) {
       const empty = document.createElement('div');
       empty.className = 'tm-empty';
-      empty.textContent = '鏆傛棤閰嶇疆锛岀偣鈥滆缃€濇柊澧?;
+      empty.textContent = '暂无配置，点“设置”新增';
       listBox.appendChild(empty);
       return;
     }
@@ -320,25 +322,26 @@ function getStationInputByRelative() {
       const row = document.createElement('div');
       row.className = 'tm-item';
 
-      // 鏄剧ず绾夸綋鏃讹紝濡傛灉鍖呭惈|鍒欐樉绀洪€夋嫨绗嚑涓?      var lineDisplay = item.line;
+      // 显示线体时，如果包含|则显示选择第几个
+      var lineDisplay = item.line;
       var lineParts = item.line.split('|');
       if (lineParts.length > 1 && lineParts[1]) {
-        lineDisplay = lineParts[0] + ' (绗? + lineParts[1] + '涓?';
+        lineDisplay = lineParts[0] + ' (第' + lineParts[1] + '个)';
       }
 
       row.innerHTML = `
         <div class="tm-name">${escapeHtml(item.name)}</div>
-        <div class="tm-sub">绾夸綋锛?{escapeHtml(lineDisplay)}</div>
-        <div class="tm-sub">宸ヤ綅锛?{escapeHtml(item.station)}</div>
+        <div class="tm-sub">线体：${escapeHtml(lineDisplay)}</div>
+        <div class="tm-sub">工位：${escapeHtml(item.station)}</div>
       `;
       row.onclick = async () => {
         try {
-          setStatus(`搴旂敤涓細${item.name} ...`);
+          setStatus(`应用中：${item.name} ...`);
           await applyPreset(item.line, item.station);
-          setStatus(`宸插簲鐢細${item.name}`);
+          setStatus(`已应用：${item.name}`);
           hidePanel();
         } catch (e) {
-          setStatus('搴旂敤澶辫触锛? + e.message, true);
+          setStatus('应用失败：' + e.message, true);
         }
       };
       listBox.appendChild(row);
@@ -349,7 +352,7 @@ function getStationInputByRelative() {
     const box = panel.querySelector('#tm_del_list');
     box.innerHTML = '';
     if (!presets.length) {
-      box.innerHTML = `<div style="font-size:12px;color:#999;">鏃犲彲鍒犻櫎椤?/div>`;
+      box.innerHTML = `<div style="font-size:12px;color:#999;">无可删除项</div>`;
       return;
     }
     presets.forEach(item => {
@@ -357,13 +360,13 @@ function getStationInputByRelative() {
       r.className = 'tm-del-item';
       r.innerHTML = `<span><b>${escapeHtml(item.name)}</b></span>`;
       const btn = document.createElement('button');
-      btn.textContent = '鍒犻櫎';
+      btn.textContent = '删除';
       btn.onclick = () => {
         presets = presets.filter(x => x.id !== item.id);
         savePresets();
         renderList();
         renderDeleteList();
-        setStatus('宸插垹闄わ細' + item.name);
+        setStatus('已删除：' + item.name);
       };
       r.appendChild(btn);
       box.appendChild(r);
@@ -402,10 +405,10 @@ function getStationInputByRelative() {
     panel.className = 'tm-minipanel';
     panel.innerHTML = `
       <div class="tm-head">
-        <span>绾夸綋宸ヤ綅蹇€熷垏鎹?/span>
+        <span>线体工位快速切换</span>
         <div>
-          <button class="tm-btn" id="tm_setting_btn">璁剧疆</button>
-          <button class="tm-btn" id="tm_close_btn">鍏抽棴</button>
+          <button class="tm-btn" id="tm_setting_btn">设置</button>
+          <button class="tm-btn" id="tm_close_btn">关闭</button>
         </div>
       </div>
       <div class="tm-body">
@@ -413,12 +416,12 @@ function getStationInputByRelative() {
         <div class="tm-list" id="tm_list"></div>
 
         <div class="tm-settings" id="tm_settings">
-          <input id="tm_name" placeholder="閰嶇疆鍚嶏紙濡傦細A绾?鍒朵綔锛?>
-          <input id="tm_line" placeholder="绾夸綋锛堝锛氱嫭绔嬪伐浣嶇嚎浣搢2 閫夌浜屼釜锛?>
-          <input id="tm_station" placeholder="宸ヤ綅锛堝锛氳閰峗鍒朵綔_鐙珛宸ヤ綅锛?>
+          <input id="tm_name" placeholder="配置名（如：A线-制作）">
+          <input id="tm_line" placeholder="线体（如：独立工位线体|2 选第二个）">
+          <input id="tm_station" placeholder="工位（如：装配_制作_独立工位）">
           <div class="tm-row">
-            <button id="tm_add" type="button">鏂板閰嶇疆</button>
-            <button id="tm_hide_setting" type="button">鏀惰捣璁剧疆</button>
+            <button id="tm_add" type="button">新增配置</button>
+            <button id="tm_hide_setting" type="button">收起设置</button>
           </div>
           <div class="tm-del-list" id="tm_del_list"></div>
         </div>
@@ -443,11 +446,11 @@ function getStationInputByRelative() {
 
       const item = {
         id: uid(),
-        name: (nameIpt.value || '').trim() || '鏈懡鍚?,
+        name: (nameIpt.value || '').trim() || '未命名',
         line: (lineIpt.value || '').trim(),
         station: (stationIpt.value || '').trim()
       };
-      if (!item.line || !item.station) return setStatus('绾夸綋鍜屽伐浣嶄笉鑳戒负绌?, true);
+      if (!item.line || !item.station) return setStatus('线体和工位不能为空', true);
 
       presets.push(item);
       savePresets();
@@ -458,21 +461,21 @@ function getStationInputByRelative() {
 
       renderList();
       renderDeleteList();
-      setStatus('宸叉柊澧為厤缃細' + item.name);
+      setStatus('已新增配置：' + item.name);
     };
 
     renderList();
     renderDeleteList();
   }
 
-  // 鐐瑰嚮鈥滅嚎浣撳伐浣嶉厤缃€濊嚜鍔ㄥ脊
+  // 点击“线体工位配置”自动弹
   document.addEventListener('click', (e) => {
     const t = e.target && e.target.closest ? e.target.closest('button, .hae-btn, [role="button"]') : null;
     if (!t) return;
     if (textOf(t).includes(OPEN_TEXT)) setTimeout(showPanel, 280);
   }, true);
 
-  // 澶囩敤蹇嵎閿?Alt+Q
+  // 备用快捷键 Alt+Q
   document.addEventListener('keydown', (e) => {
     if (!e.altKey || (e.key || '').toLowerCase() !== 'q') return;
     e.preventDefault();
@@ -480,5 +483,5 @@ function getStationInputByRelative() {
   }, true);
 
   window.__lineStationPanel = { showPanel, hidePanel, applyPreset };
-  console.log('[TM] v2.3.1 宸插姞杞斤紝鏀寔鍚屽悕绾夸綋閫夋嫨绗嚑涓?);
+  console.log('[TM] v2.3.1 已加载，支持同名线体选择第几个');
 })();
