@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name        MES 涓€浣撳寲锛堝浐瀹氶摼鎺?鎵归噺杩囩珯锛?// @namespace    tampermonkey.mes.allinone.final
+// @name        MES 一体化（固定链接+批量过站）
+// @namespace    tampermonkey.mes.allinone.final
 // @version      3.0
-// @description  鍥哄畾UI鎻愬彇鏉＄爜骞跺洖濉紱鎵嬪姩杞藉叆寮€濮嬶紱SN閲嶅閿佸畾+甯搁┗姘旀场
+// @description  固定UI提取条码并回填；手动载入开始；SN重复锁定+常驻气泡
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -17,7 +18,7 @@
 (async function () {
   'use strict';
 
-  // ===== MES鎺堟潈闂ㄧ START =====
+  // ===== MES授权门禁 START =====
   async function __MES_AUTH_GATE__() {
     if (
       location.hostname === 'mes.huawei.com' &&
@@ -35,7 +36,7 @@
         var st = JSON.parse(localStorage.getItem(KEY) || 'null');
 
         if (st && st.ok && Date.now() - Number(st.ts || 0) < 10000) {
-          console.log('[MES鎺堟潈闂ㄧ] 宸叉巿鏉冿紝鑴氭湰缁х画杩愯锛?, st.jobNumber);
+          console.log('[MES授权门禁] 已授权，脚本继续运行：', st.jobNumber);
           return true;
         }
       } catch (e) {}
@@ -45,32 +46,32 @@
       });
     }
 
-    console.warn('[MES鎺堟潈闂ㄧ] 鏈巿鏉冿紝鑴氭湰宸插仠姝㈣繍琛?);
+    console.warn('[MES授权门禁] 未授权，脚本已停止运行');
     return false;
   }
 
   if (!(await __MES_AUTH_GATE__())) return;
-  // ===== MES鎺堟潈闂ㄧ END =====
+  // ===== MES授权门禁 END =====
 
 
-  // 鍥哄畾鎻愬彇閾炬帴锛堟寜浣犺姹傦級
+  // 固定提取链接（按你要求）
 
 
-  // 鍥哄畾鎻愬彇閾炬帴锛堟寜浣犺姹傦級
+  // 固定提取链接（按你要求）
   var FIXED_UI_URL = 'https://mes.huawei.com/mespmm/rptwebnew#/ProductList#autoExtract=1';
 
-    // ===== 淇濇寔鐧诲叆 =====
+    // ===== 保持登入 =====
 var KEEPALIVE_URL = 'https://w3.huawei.com/mespmm/gateway/com.huawei.supply.mes.mesplus.pspw:mespmmsystemservice/mespmm/sys/only4ssoTimeUpdate.do';
 var KEEPALIVE_CFG_KEY = 'tm_keepalive_cfg';
 var keepAliveTimer = null;
 
-// 浠诲姟浠ゆ潯鐮佹帴鍙ｆ彁鍙栵紝涓€椤垫渶澶?00鏉★紝瓒呰繃鑷姩缈婚〉
+// 任务令条码接口提取，一页最多100条，超过自动翻页
 var TASK_SN_API_BASE = 'https://w3.huawei.com/mespmm/gateway/S007307:mespmmrptservice/mespmm/rpt/services/wipTaskSn/findlist/page';
 
   var fallbackIndex = 3;
   var loadingSelector = '#global_toploading_flag';
 
-  // 蹇參鑷€傚簲
+  // 快慢自适应
   var tickMs = 50;
   var maxWaitMs = 60000;
   var fastPassMs = 1200;
@@ -91,7 +92,7 @@ var TASK_SN_API_BASE = 'https://w3.huawei.com/mespmm/gateway/S007307:mespmmrptse
 
   var extractRunning = false;
   var lastJobId = '';
-// ===== 鏉＄爜鍥炶溅锛氭壂鐮佹灙鐪熷疄Enter鍚庯紝绛夊緟鈥滀骇鍝佽繘绔欐垚鍔熲€濓紝鍐嶈ˉ涓€涓狤nter =====
+// ===== 条码回车：扫码枪真实Enter后，等待“产品进站成功”，再补一个Enter =====
 var BARCODE_ENTER_KEY = 'tm_barcode_enter_on';
 
 var barcodeEnterPending = false;
@@ -104,7 +105,7 @@ var barcodeEnterDocBound = false;
 var barcodeEnterBgStarted = false;
 
 
-// 璁板綍鎵爜鍓嶉〉闈笂宸叉湁澶氬皯鏉♀€滃綋鍓嶆潯鐮佽繘绔欐垚鍔熲€濇彁绀猴紝闃叉鏃ф彁绀鸿瑙﹀彂
+// 记录扫码前页面上已有多少条“当前条码进站成功”提示，防止旧提示误触发
 var barcodeEnterSuccessCountBefore = 0;
 
 
@@ -152,7 +153,8 @@ function saveKeepAliveCfg(c) {
 
 async function keepAliveOnce() {
   try {
-    // 鍙湪 w3 鍩熷悕鎵ц锛岄伩鍏嶅叾瀹冮〉闈㈣法鍩熷紓甯?    if (location.hostname !== 'w3.huawei.com') return;
+    // 只在 w3 域名执行，避免其它页面跨域异常
+    if (location.hostname !== 'w3.huawei.com') return;
 
     var r = await fetch(KEEPALIVE_URL, {
       method: 'GET',
@@ -164,15 +166,15 @@ async function keepAliveOnce() {
 
     if (r.status === 401) {
       if (el) {
-        el.textContent = '鎺夌嚎';
+        el.textContent = '掉线';
         el.style.color = '#cf1322';
       }
-      console.warn('[MES] 淇濇寔鐧诲叆澶辫触锛?01');
+      console.warn('[MES] 保持登入失败：401');
       return;
     }
 
     if (el) {
-      el.textContent = '鍦ㄧ嚎';
+      el.textContent = '在线';
       el.style.color = '#389e0d';
     }
 
@@ -180,7 +182,7 @@ async function keepAliveOnce() {
   } catch (e) {
     var el2 = document.getElementById('tm-keepalive-status');
     if (el2) {
-      el2.textContent = '寮傚父';
+      el2.textContent = '异常';
       el2.style.color = '#fa8c16';
     }
     console.warn('[MES] keepAlive error:', e);
@@ -198,7 +200,7 @@ function restartKeepAlive() {
   if (!cfg.enabled) {
     var el = document.getElementById('tm-keepalive-status');
     if (el) {
-      el.textContent = '鍏?;
+      el.textContent = '关';
       el.style.color = '#666';
     }
     return;
@@ -217,7 +219,7 @@ function restartKeepAlive() {
   function parseCodes(txt) {
     return (txt || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
   }
-// ===== 鏉＄爜鍥炶溅鍔熻兘 =====
+// ===== 条码回车功能 =====
 function isBarcodeEnterEnabled() {
   return localStorage.getItem(BARCODE_ENTER_KEY) === '1';
 }
@@ -232,10 +234,10 @@ function isBarcodeInput(el) {
   var box = el.closest && el.closest('div[id^="Input_"]');
   var ctx = ((box && box.parentElement ? box.parentElement.innerText : '') || '').replace(/\s+/g, '');
 
-  return ctx.indexOf('鏉＄爜閲囬泦') >= 0;
+  return ctx.indexOf('条码采集') >= 0;
 }
 
-// 缁熻椤甸潰涓娾€滃綋鍓嶆潯鐮?+ 浜у搧杩涚珯鎴愬姛鈥濈殑娆℃暟
+// 统计页面上“当前条码 + 产品进站成功”的次数
 function countBarcodeTrackInSuccess(code) {
   if (!code) return 0;
 
@@ -255,19 +257,20 @@ function countBarcodeTrackInSuccess(code) {
 
     if (idx < 0) break;
 
-    // 鍙栧綋鍓嶆潯鐮侀檮杩戠殑鏂囧瓧
-    // 绀轰緥锛?    // 銆?32VBY10S6001881銆戣繃绔欎俊鎭細
-    // 浜у搧杩涚珯鎴愬姛!
+    // 取当前条码附近的文字
+    // 示例：
+    // 【032VBY10S6001881】过站信息：
+    // 产品进站成功!
     var near = text.slice(Math.max(0, idx - 80), idx + 500);
 
     var hasSuccess =
-      near.indexOf('浜у搧杩涚珯鎴愬姛') >= 0 ||
-      near.indexOf('杩涚珯鎴愬姛') >= 0;
+      near.indexOf('产品进站成功') >= 0 ||
+      near.indexOf('进站成功') >= 0;
 
     var hasInfo =
-      near.indexOf('杩囩珯淇℃伅') >= 0 ||
-      near.indexOf('杩涚珯淇℃伅') >= 0 ||
-      near.indexOf('杩囩珯') >= 0;
+      near.indexOf('过站信息') >= 0 ||
+      near.indexOf('进站信息') >= 0 ||
+      near.indexOf('过站') >= 0;
 
     if (hasSuccess && hasInfo) {
       count++;
@@ -289,49 +292,50 @@ function hasNewBarcodeTrackInSuccess(code) {
 function prepareBarcodeEnter(input, reason) {
   if (!isBarcodeEnterEnabled()) return;
 
-  // 鎵归噺杩囩珯杩愯鏃朵笉瑙﹀彂锛岄伩鍏嶅啿绐?  if (running || waiting) return;
+  // 批量过站运行时不触发，避免冲突
+  if (running || waiting) return;
 
-  // 鑷繁琛?Enter 鏃朵笉瑙﹀彂
+  // 自己补 Enter 时不触发
   if (barcodeEnterSending) return;
 
   var v = input && input.value ? String(input.value).trim() : '';
 
   if (!v) return;
 
-  // 璁板綍鎵爜鍓嶉〉闈笂宸叉湁澶氬皯鏉″綋鍓嶆潯鐮佹垚鍔熸彁绀猴紝闃叉鏃ф彁绀鸿瑙﹀彂
+  // 记录扫码前页面上已有多少条当前条码成功提示，防止旧提示误触发
   barcodeEnterSuccessCountBefore = countBarcodeTrackInSuccess(v);
 
   barcodeEnterPending = true;
   barcodeEnterTriggerAt = Date.now();
   barcodeEnterValue = v;
 
-  console.log('[MES] 鏉＄爜鍥炶溅锛氬凡鎹曡幏鎵爜 Enter锛岀瓑寰呰繘绔欐垚鍔熸彁绀?, {
+  console.log('[MES] 条码回车：已捕获扫码 Enter，等待进站成功提示', {
     value: v,
     reason: reason,
     successCountBefore: barcodeEnterSuccessCountBefore
   });
 
-  setStatus('鏉＄爜鍥炶溅锛氱瓑寰呰繘绔欐垚鍔熸彁绀?, '#1677ff');
+  setStatus('条码回车：等待进站成功提示', '#1677ff');
 }
 
 function pressEnterForBarcodeEnter() {
   var input = getParentInput();
 
   if (!input) {
-    setStatus('鏉＄爜鍥炶溅锛氭湭鎵惧埌鏉＄爜閲囬泦妗?, '#cf1322');
+    setStatus('条码回车：未找到条码采集框', '#cf1322');
     return false;
   }
 
   var currentValue = String(input.value || '').trim();
 
-  // 濡傛灉杈撳叆妗嗗唴瀹瑰凡缁忓彉浜嗭紝璇存槑鐢ㄦ埛鍙堟壂浜嗗埆鐨勶紝閬垮厤璇ˉ
+  // 如果输入框内容已经变了，说明用户又扫了别的，避免误补
   if (barcodeEnterValue && currentValue && currentValue !== barcodeEnterValue) {
-    console.warn('[MES] 鏉＄爜鍥炶溅锛氳緭鍏ユ鍐呭宸插彉鍖栵紝鍙栨秷琛?Enter', {
+    console.warn('[MES] 条码回车：输入框内容已变化，取消补 Enter', {
       oldValue: barcodeEnterValue,
       currentValue: currentValue
     });
 
-    setStatus('鏉＄爜鍥炶溅锛氭潯鐮佸凡鍙樺寲锛屽彇娑堣ˉ Enter', '#fa8c16');
+    setStatus('条码回车：条码已变化，取消补 Enter', '#fa8c16');
     return false;
   }
 
@@ -355,9 +359,9 @@ function pressEnterForBarcodeEnter() {
 
     barcodeEnterLastAutoAt = Date.now();
 
-    console.log('[MES] 鏉＄爜鍥炶溅锛氬凡鑷姩琛?Enter', barcodeEnterValue);
+    console.log('[MES] 条码回车：已自动补 Enter', barcodeEnterValue);
 
-    setStatus('鏉＄爜鍥炶溅锛氬凡鑷姩琛?Enter', '#389e0d');
+    setStatus('条码回车：已自动补 Enter', '#389e0d');
 
     return true;
   } finally {
@@ -374,7 +378,8 @@ function bindBarcodeEnterInput() {
     barcodeEnterBoundInput = input;
   }
 
-  // document 绾х洃鍚彧缁戝畾涓€娆?  // 涓嶄緷璧栭潰鏉挎槸鍚︽樉绀猴紝涔熶笉鎬?MES 閲嶆覆鏌撹緭鍏ユ
+  // document 级监听只绑定一次
+  // 不依赖面板是否显示，也不怕 MES 重渲染输入框
   if (barcodeEnterDocBound) return;
 
   barcodeEnterDocBound = true;
@@ -385,7 +390,7 @@ function bindBarcodeEnterInput() {
 
       if (e.key !== 'Enter' && e.keyCode !== 13) return;
 
-      // 鍙帴鍙楃湡瀹炴壂鐮佹灙/閿洏 Enter锛屼笉鎺ュ彈鑴氭湰鑷繁娲惧彂鐨?Enter
+      // 只接受真实扫码枪/键盘 Enter，不接受脚本自己派发的 Enter
       if (!e.isTrusted) return;
 
       var target = e.target;
@@ -396,17 +401,17 @@ function bindBarcodeEnterInput() {
 
       barcodeEnterBoundInput = target;
 
-      // 寤惰繜涓€鎷嶏紝纭繚鎵爜鏋緭鍏ュ€煎凡缁忓啓鍏?input.value
+      // 延迟一拍，确保扫码枪输入值已经写入 input.value
       setTimeout(function () {
         prepareBarcodeEnter(target, 'background document trusted enter');
       }, 0);
 
     } catch (err) {
-      console.warn('[MES] 鏉＄爜鍥炶溅锛歞ocument鐩戝惉寮傚父', err);
+      console.warn('[MES] 条码回车：document监听异常', err);
     }
   }, true);
 
-  console.log('[MES] 鏉＄爜鍥炶溅锛歞ocument绾х洃鍚凡鍚姩锛岄潰鏉挎渶灏忓寲涓嶅奖鍝?);
+  console.log('[MES] 条码回车：document级监听已启动，面板最小化不影响');
 }
 
 
@@ -416,30 +421,33 @@ async function barcodeEnterTick() {
     return;
   }
 
-  // 瀹氭湡缁戝畾锛屽洜涓洪〉闈㈠彲鑳介噸娓叉煋杈撳叆妗?  bindBarcodeEnterInput();
+  // 定期绑定，因为页面可能重渲染输入框
+  bindBarcodeEnterInput();
 
   if (!barcodeEnterPending) return;
 
-  // 鎵归噺杩囩珯涓笉澶勭悊
+  // 批量过站中不处理
   if (running || waiting) return;
 
   var now = Date.now();
 
-  // 瓒呰繃 15 绉掓病妫€娴嬪埌鎴愬姛鎻愮ず锛屽彇娑堟湰娆?  if (now - barcodeEnterTriggerAt > 15000) {
+  // 超过 15 秒没检测到成功提示，取消本次
+  if (now - barcodeEnterTriggerAt > 15000) {
     barcodeEnterPending = false;
 
-    console.warn('[MES] 鏉＄爜鍥炶溅锛氱瓑寰呰繘绔欐垚鍔熸彁绀鸿秴鏃讹紝鍙栨秷鏈', barcodeEnterValue);
+    console.warn('[MES] 条码回车：等待进站成功提示超时，取消本次', barcodeEnterValue);
 
-    setStatus('鏉＄爜鍥炶溅锛氱瓑寰呰繘绔欐垚鍔熻秴鏃讹紝宸插彇娑?, '#fa8c16');
+    setStatus('条码回车：等待进站成功超时，已取消', '#fa8c16');
 
     return;
   }
 
-  // 鍙垽鏂綋鍓嶆潯鐮佹槸鍚﹀嚭鐜版柊鐨勨€滀骇鍝佽繘绔欐垚鍔熲€濇彁绀?  if (!hasNewBarcodeTrackInSuccess(barcodeEnterValue)) {
+  // 只判断当前条码是否出现新的“产品进站成功”提示
+  if (!hasNewBarcodeTrackInSuccess(barcodeEnterValue)) {
     return;
   }
 
-  // 闃叉鐭椂闂撮噸澶嶈ˉ Enter
+  // 防止短时间重复补 Enter
   if (now - barcodeEnterLastAutoAt < 2500) {
     barcodeEnterPending = false;
     return;
@@ -447,15 +455,15 @@ async function barcodeEnterTick() {
 
   barcodeEnterPending = false;
 
-  console.log('[MES] 鏉＄爜鍥炶溅锛氭娴嬪埌褰撳墠鏉＄爜杩涚珯鎴愬姛锛屽噯澶囪ˉ Enter', {
+  console.log('[MES] 条码回车：检测到当前条码进站成功，准备补 Enter', {
     barcode: barcodeEnterValue,
     before: barcodeEnterSuccessCountBefore,
     now: countBarcodeTrackInSuccess(barcodeEnterValue)
   });
 
-  setStatus('鏉＄爜鍥炶溅锛氭娴嬪埌杩涚珯鎴愬姛锛屽噯澶囪ˉ Enter', '#389e0d');
+  setStatus('条码回车：检测到进站成功，准备补 Enter', '#389e0d');
 
-  // 绋嶇瓑椤甸潰绋冲畾
+  // 稍等页面稳定
   await sleep(300);
 
   pressEnterForBarcodeEnter();
@@ -472,12 +480,13 @@ async function barcodeEnterTick() {
   for (var i = 0; i < tokens.length; i++) {
     var t = tokens[i];
 
-    // 浠诲姟浠や竴鑸槸 10~12 浣嶏紝鍓嶉潰鑷冲皯4浣嶅瓧姣嶏紝涓斿寘鍚暟瀛?    // 绀轰緥锛欵PZE145150D銆丒PZEL452606銆丏DEDZN051406
+    // 任务令一般是 10~12 位，前面至少4位字母，且包含数字
+    // 示例：EPZE145150D、EPZEL452606、DDEDZN051406
     if (t.length < 10 || t.length > 12) continue;
     if (!/^[A-Z]{4,8}[A-Z0-9]*$/.test(t)) continue;
     if (!/[0-9]/.test(t)) continue;
 
-    // 鎺掗櫎鏄庢樉涓嶆槸浠诲姟浠ょ殑鍐呭
+    // 排除明显不是任务令的内容
     if (t.indexOf('ROHS') >= 0) continue;
     if (t.indexOf('LINE') === 0) continue;
     if (t.indexOf('SUB') === 0) continue;
@@ -491,7 +500,7 @@ async function barcodeEnterTick() {
   return out;
 }
 
-      // ===== 浠诲姟浠ゆ潯鐮佹帴鍙ｆ彁鍙?=====
+      // ===== 任务令条码接口提取 =====
   function taskApiPad2(n) {
     return n < 10 ? '0' + n : '' + n;
   }
@@ -518,32 +527,32 @@ async function barcodeEnterTick() {
         onload: function (res) {
           var text = String(res.responseText || '');
 
-          console.groupCollapsed('[TASK-SN-API] 杩斿洖 ' + res.status);
+          console.groupCollapsed('[TASK-SN-API] 返回 ' + res.status);
           console.log('URL:', url);
           console.log('Body:', data);
-          console.log('Response鍓?500瀛楃:', text.slice(0, 1500));
+          console.log('Response前1500字符:', text.slice(0, 1500));
           console.groupEnd();
 
           if (res.status < 200 || res.status >= 300) {
-            reject(new Error('HTTP ' + res.status + '锛? + text.slice(0, 200)));
+            reject(new Error('HTTP ' + res.status + '：' + text.slice(0, 200)));
             return;
           }
 
           try {
             resolve(JSON.parse(text));
           } catch (e) {
-            reject(new Error('JSON瑙ｆ瀽澶辫触锛? + text.slice(0, 200)));
+            reject(new Error('JSON解析失败：' + text.slice(0, 200)));
           }
         },
         onerror: function (e) {
           try {
-            reject(new Error('璇锋眰澶辫触锛? + JSON.stringify(e).slice(0, 200)));
+            reject(new Error('请求失败：' + JSON.stringify(e).slice(0, 200)));
           } catch (err) {
-            reject(new Error('璇锋眰澶辫触'));
+            reject(new Error('请求失败'));
           }
         },
         ontimeout: function () {
-          reject(new Error('璇锋眰瓒呮椂'));
+          reject(new Error('请求超时'));
         }
       });
     });
@@ -552,7 +561,8 @@ async function barcodeEnterTick() {
   function buildTaskSnBody(taskNo, siteId) {
     var end = new Date();
 
-    // 鏌ユ渶杩?80澶╋紝浠诲姟浠ゆ瘮杈冭€佷篃鑳借鐩?    var start = new Date(end.getTime() - 180 * 24 * 3600 * 1000);
+    // 查最近180天，任务令比较老也能覆盖
+    var start = new Date(end.getTime() - 180 * 24 * 3600 * 1000);
 
     return {
       siteId: String(siteId),
@@ -580,7 +590,7 @@ async function queryTaskSnOneMode(taskNo, siteId, modeA, modeB) {
     var body = buildTaskSnBody(taskNo, siteId);
 
     console.log(
-      '[TASK-SN-API] 鏌ヨ taskNo=' + String(taskNo).slice(0, 80) +
+      '[TASK-SN-API] 查询 taskNo=' + String(taskNo).slice(0, 80) +
       ' siteId=' + siteId +
       ' mode=' + modeA + '/' + modeB +
       ' page=' + pageNo
@@ -604,15 +614,16 @@ async function queryTaskSnOneMode(taskNo, siteId, modeA, modeB) {
 
 
 setStatus(
-  '鎺ュ彛缈婚〉锛歴iteId=' + siteId +
+  '接口翻页：siteId=' + siteId +
   ' mode=' + modeA + '/' + modeB +
-  ' 绗? + pageNo +
-  '椤碉紝绱' + allRows.length + '鏉?,
+  ' 第' + pageNo +
+  '页，累计' + allRows.length + '条',
   '#1677ff'
 );
 
-    // 鏍稿績锛氫笉瑕佸彧淇?totalPages
-    // 涓€椤垫渶澶?00鏉★紝濡傛灉鏈〉灏戜簬100锛岃鏄庡埌鏈€鍚庝竴椤?    if (rows.length < pageSize) {
+    // 核心：不要只信 totalPages
+    // 一页最多100条，如果本页少于100，说明到最后一页
+    if (rows.length < pageSize) {
       break;
     }
 
@@ -620,10 +631,10 @@ setStatus(
   }
 
   console.log(
-    '[TASK-SN-API] 瀹屾垚 siteId=' + siteId +
+    '[TASK-SN-API] 完成 siteId=' + siteId +
     ' mode=' + modeA + '/' + modeB +
-    ' 鎬籸ows=' + allRows.length +
-    ' 鏌ヨ椤垫暟=' + pageNo
+    ' 总rows=' + allRows.length +
+    ' 查询页数=' + pageNo
   );
 
   return allRows;
@@ -640,16 +651,17 @@ async function extractTaskCodesByApi(taskNos) {
   }).filter(Boolean);
 
   if (!taskNos.length) {
-    throw new Error('鏈瘑鍒埌浠诲姟浠?);
+    throw new Error('未识别到任务令');
   }
 
-   // 鎺ュ彛鏀寔澶氫换鍔′护锛氶€楀彿鍒嗛殧
+   // 接口支持多任务令：逗号分隔
   var taskNoText = taskNos.join(',');
 
 
-  // 涓や釜缁勭粐閮藉皾璇曪紝閬垮厤涓嶅悓浠诲姟浠ゅ睘浜庝笉鍚岀粍缁?  var siteIds = ['50', '66'];
+  // 两个组织都尝试，避免不同任务令属于不同组织
+  var siteIds = ['50', '66'];
 
-  // 浣犳姄鍒拌繃 /10/0 鍜?/0/0锛屼袱绉嶉兘灏濊瘯
+  // 你抓到过 /10/0 和 /0/0，两种都尝试
   var modes = [
     [10, 0],
     [0, 0]
@@ -686,10 +698,10 @@ async function extractTaskCodesByApi(taskNos) {
       }
 
       console.log(
-        '[TASK-SN-API] 缁勫悎瀹屾垚 siteId=' + siteId +
+        '[TASK-SN-API] 组合完成 siteId=' + siteId +
         ' mode=' + modeA + '/' + modeB +
         ' rows=' + rows.length +
-        ' 褰撳墠绱SN=' + allCodes.length
+        ' 当前累计SN=' + allCodes.length
       );
     }
   }
@@ -710,13 +722,13 @@ async function extractTaskCodesByApi(taskNos) {
     return st.display !== 'none' && st.visibility !== 'hidden' && st.opacity !== '0';
   }
 
-  // ===== 鐖堕」杩囩珯杈撳叆妗?=====
+  // ===== 父项过站输入框 =====
   function getParentInput() {
     var all = [].slice.call(document.querySelectorAll('div[id^="Input_"] > input.hae-ui-input[type="text"],div[id^="Input_"] > input'));
     for (var i = 0; i < all.length; i++) {
       var box = all[i].closest('div[id^="Input_"]');
       var ctx = ((box && box.parentElement ? box.parentElement.innerText : '') || '').replace(/\s+/g, '');
-      if (ctx.indexOf('鏉＄爜閲囬泦') >= 0) return all[i];
+      if (ctx.indexOf('条码采集') >= 0) return all[i];
     }
     return all[fallbackIndex] || null;
   }
@@ -724,7 +736,7 @@ async function extractTaskCodesByApi(taskNos) {
   async function submitOne(code) {
     var input = getParentInput();
     if (!input) {
-      setStatus('鏈壘鍒扳€滄潯鐮侀噰闆嗏€濊緭鍏ユ', '#cf1322');
+      setStatus('未找到“条码采集”输入框', '#cf1322');
       running = false;
       return false;
     }
@@ -779,14 +791,15 @@ async function extractTaskCodesByApi(taskNos) {
         if (Date.now() - waitStart > maxWaitMs) {
           running = false;
           waiting = false;
-          setStatus('绗?' + (idx + 1) + ' 鏉¤秴鏃讹細' + currentCode + '锛屽凡鏆傚仠', '#cf1322');
+          setStatus('第 ' + (idx + 1) + ' 条超时：' + currentCode + '，已暂停', '#cf1322');
         }
         return;
       }
 
       if (idx >= queue.length) {
         running = false;
-        localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 銆愬姞杩欒锛氬彇娑堟殫鍙枫€?        setStatus('瀹屾垚锛氬叡 ' + queue.length + ' 鏉?, '#389e0d');
+        localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 【加这行：取消暗号】
+        setStatus('完成：共 ' + queue.length + ' 条', '#389e0d');
         return;
       }
 
@@ -801,13 +814,13 @@ currentCode = queue[idx];
       submitAt = Date.now();
       waiting = true;
       waitStart = Date.now();
-      setStatus('鎻愪氦涓?(' + (idx + 1) + '/' + queue.length + ')锛? + currentCode, '#1677ff');
+      setStatus('提交中 (' + (idx + 1) + '/' + queue.length + ')：' + currentCode, '#1677ff');
     } finally {
       ticking = false;
     }
   }
 
-  // ===== 鎻愬彇閫昏緫 =====
+  // ===== 提取逻辑 =====
   function getTaskMagnifier() {
     var list = [].slice.call(document.querySelectorAll('a.hae-icon.icon-search')).filter(isVisible);
     return list[1] || null;
@@ -817,7 +830,7 @@ currentCode = queue[idx];
     var titles = document.querySelectorAll('.hae-dialog__title');
     for (var i = 0; i < titles.length; i++) {
       var t = titles[i];
-      if ((t.innerText || '').indexOf('浠诲姟浠ゅ杈撳叆妗?) >= 0 && isVisible(t)) {
+      if ((t.innerText || '').indexOf('任务令多输入框') >= 0 && isVisible(t)) {
         return t.closest('.hae-dialog__wrapper') || t.closest('.hae-dialog-box');
       }
     }
@@ -909,12 +922,12 @@ currentCode = queue[idx];
       var mags = [].slice.call(document.querySelectorAll('a.hae-icon.icon-search')).filter(isVisible);
       return mags.length >= 2;
     }, 45000, 300);
-    if (!ok) throw new Error('鎻愬彇椤垫湭灏辩华');
+    if (!ok) throw new Error('提取页未就绪');
   }
 
   async function runExtract(taskNo) {
     var mag = getTaskMagnifier();
-    if (!mag) throw new Error('鏈壘鍒颁换鍔′护鏀惧ぇ闀?);
+    if (!mag) throw new Error('未找到任务令放大镜');
     mag.click();
     await sleep(250);
 
@@ -925,28 +938,28 @@ currentCode = queue[idx];
       if (dialog && ta && isVisible(ta)) break;
       await sleep(140);
     }
-    if (!ta) throw new Error('鏈壘鍒颁换鍔′护杈撳叆妗?);
+    if (!ta) throw new Error('未找到任务令输入框');
 
     ta.focus();
     ta.click();
     setTextareaValue(ta, taskNo);
     await sleep(140);
 
-    var saveBtn = findBtnByText('淇濆瓨', dialog) || findBtnByText('淇濆瓨', document);
-    if (!saveBtn) throw new Error('鏈壘鍒颁繚瀛樻寜閽?);
+    var saveBtn = findBtnByText('保存', dialog) || findBtnByText('保存', document);
+    if (!saveBtn) throw new Error('未找到保存按钮');
     saveBtn.click();
 
     await sleep(260);
 
-    var queryBtn = findBtnByText('鏌ヨ', document);
-    if (!queryBtn) throw new Error('鏈壘鍒版煡璇㈡寜閽?);
+    var queryBtn = findBtnByText('查询', document);
+    if (!queryBtn) throw new Error('未找到查询按钮');
     queryBtn.click();
 
     var ok = await waitLoadingDone(18000);
-    if (!ok) throw new Error('鏌ヨ瓒呮椂');
+    if (!ok) throw new Error('查询超时');
 
     var rowsOk = await waitRowsReady(12000);
-    if (!rowsOk) throw new Error('琛ㄦ牸鏈覆鏌?);
+    if (!rowsOk) throw new Error('表格未渲染');
 
     return extractCodes();
   }
@@ -974,7 +987,7 @@ currentCode = queue[idx];
     try {
       await waitExtractReady();
       var codes = await runExtractWithRetry(job.taskNo, 3);
-      if (!codes.length) throw new Error('閲嶈瘯鍚庝粛鏈彁鍙栧埌鏉＄爜');
+      if (!codes.length) throw new Error('重试后仍未提取到条码');
 
       await GM_setValue(KEY_RESULT, {
         ok: true,
@@ -1022,11 +1035,12 @@ function startBarcodeEnterBackgroundService() {
   var bgLoadingGoneCount = 0;
   var bgLastAutoAt = 0;
 
-  // 鏈€闀跨瓑寰?loading 鍑虹幇鏃堕棿
-  // 瓒呰繃杩欎釜鏃堕棿娌＄湅鍒?loading锛屽氨鍙栨秷锛屼笉琛?Enter
+  // 最长等待 loading 出现时间
+  // 超过这个时间没看到 loading，就取消，不补 Enter
   var BG_WAIT_LOADING_MS = 8000;
 
-  // 鏈€闀挎€荤瓑寰呮椂闂?  var BG_MAX_WAIT_MS = 30000;
+  // 最长总等待时间
+  var BG_MAX_WAIT_MS = 30000;
 
   function bgMakeEnterEvent(type) {
     var e = new KeyboardEvent(type, {
@@ -1063,13 +1077,13 @@ function startBarcodeEnterBackgroundService() {
     }
 
     if (!input) {
-      console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氭湭鎵惧埌鏉＄爜閲囬泦妗嗭紝鏃犳硶琛nter');
-      setStatus('鏉＄爜鍥炶溅锛氭湭鎵惧埌鏉＄爜閲囬泦妗?, '#cf1322');
+      console.warn('[MES] 条码回车后台：未找到条码采集框，无法补Enter');
+      setStatus('条码回车：未找到条码采集框', '#cf1322');
       return false;
     }
 
     if (Date.now() - bgLastAutoAt < 1200) {
-      console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氳窛绂讳笂娆¤ˉEnter澶繎锛岃烦杩?);
+      console.warn('[MES] 条码回车后台：距离上次补Enter太近，跳过');
       return false;
     }
 
@@ -1085,13 +1099,13 @@ function startBarcodeEnterBackgroundService() {
       bgLastAutoAt = Date.now();
       barcodeEnterLastAutoAt = Date.now();
 
-      console.log('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氭娴嬪埌loading缁撴潫锛屽凡琛nter', {
+      console.log('[MES] 条码回车后台：检测到loading结束，已补Enter', {
         reason: reason,
         barcode: bgCode,
         inputValue: String(input.value || '')
       });
 
-      setStatus('鏉＄爜鍥炶溅锛歭oading缁撴潫锛屽凡琛?Enter', '#389e0d');
+      setStatus('条码回车：loading结束，已补 Enter', '#389e0d');
 
       return true;
     } finally {
@@ -1123,12 +1137,12 @@ function startBarcodeEnterBackgroundService() {
 
       if (e.key !== 'Enter' && e.keyCode !== 13) return;
 
-      // 鍙鐞嗘壂鐮佹灙/閿洏鐪熷疄 Enter
+      // 只处理扫码枪/键盘真实 Enter
       if (!e.isTrusted) return;
 
       var target = e.target;
 
-      // 鍙鐞嗘潯鐮侀噰闆嗘
+      // 只处理条码采集框
       if (!bgIsBarcodeTarget(target)) return;
 
       var v = String(target.value || '').trim();
@@ -1144,16 +1158,16 @@ function startBarcodeEnterBackgroundService() {
         barcodeEnterBoundInput = target;
 
 
-      console.log('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氭崟鑾锋潯鐮佺湡瀹濫nter锛岀瓑寰卨oading鍑虹幇', {
+      console.log('[MES] 条码回车后台：捕获条码真实Enter，等待loading出现', {
         barcode: bgCode,
         panelHidden: !!document.getElementById('tm-fab') &&
           getComputedStyle(document.getElementById('tm-fab')).display !== 'none'
       });
 
-      setStatus('鏉＄爜鍥炶溅锛氱瓑寰卨oading', '#1677ff');
+      setStatus('条码回车：等待loading', '#1677ff');
 
     } catch (err) {
-      console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氱湡瀹濫nter鐩戝惉寮傚父', err);
+      console.warn('[MES] 条码回车后台：真实Enter监听异常', err);
     }
   }, true);
 
@@ -1175,20 +1189,20 @@ function startBarcodeEnterBackgroundService() {
         loading = false;
       }
 
-      // 鐪嬪埌 loading
+      // 看到 loading
       if (loading) {
         bgSawLoading = true;
         bgLoadingGoneCount = 0;
 
-        setStatus('鏉＄爜鍥炶溅锛氭娴嬪埌loading锛岀瓑寰呯粨鏉?, '#1677ff');
+        setStatus('条码回车：检测到loading，等待结束', '#1677ff');
         return;
       }
 
-      // 宸茬粡鐪嬪埌杩?loading锛岀幇鍦?loading 娑堝け
+      // 已经看到过 loading，现在 loading 消失
       if (bgSawLoading && !loading) {
         bgLoadingGoneCount++;
 
-        // 杩炵画妫€娴嬩袱娆℃秷澶憋紝璁や负椤甸潰缂撳啿缁撴潫
+        // 连续检测两次消失，认为页面缓冲结束
         if (bgLoadingGoneCount >= 2) {
           bgPending = false;
 
@@ -1200,38 +1214,38 @@ function startBarcodeEnterBackgroundService() {
         }
       }
 
-      // 娌＄湅鍒?loading锛岃秴杩囩瓑寰呮椂闂达細鍙栨秷锛屼笉琛?Enter
+      // 没看到 loading，超过等待时间：取消，不补 Enter
       if (!bgSawLoading && now - bgTriggerAt >= BG_WAIT_LOADING_MS) {
         bgPending = false;
 
-        console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氭湭妫€娴嬪埌loading锛屽彇娑堟湰娆★紝涓嶈ˉEnter', {
+        console.warn('[MES] 条码回车后台：未检测到loading，取消本次，不补Enter', {
           barcode: bgCode,
           waitMs: BG_WAIT_LOADING_MS
         });
 
-        setStatus('鏉＄爜鍥炶溅锛氭湭妫€娴嬪埌loading锛屽凡鍙栨秷', '#fa8c16');
+        setStatus('条码回车：未检测到loading，已取消', '#fa8c16');
         return;
       }
 
-      // 鎬昏秴鏃朵繚鎶わ細鍙栨秷锛屼笉琛?Enter
+      // 总超时保护：取消，不补 Enter
       if (now - bgTriggerAt >= BG_MAX_WAIT_MS) {
         bgPending = false;
 
-        console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氱瓑寰卨oading缁撴潫瓒呮椂锛屽彇娑堟湰娆★紝涓嶈ˉEnter', {
+        console.warn('[MES] 条码回车后台：等待loading结束超时，取消本次，不补Enter', {
           barcode: bgCode,
           waitMs: BG_MAX_WAIT_MS
         });
 
-        setStatus('鏉＄爜鍥炶溅锛氱瓑寰卨oading瓒呮椂锛屽凡鍙栨秷', '#fa8c16');
+        setStatus('条码回车：等待loading超时，已取消', '#fa8c16');
         return;
       }
 
     } catch (err) {
-      console.warn('[MES] 鏉＄爜鍥炶溅鍚庡彴锛氭娴嬪紓甯?, err);
+      console.warn('[MES] 条码回车后台：检测异常', err);
     }
   }, 100);
 
-  console.log('[MES] 鏉＄爜鍥炶溅鐙珛鍚庡彴鏈嶅姟宸插惎鍔細鍙娴媗oading锛屾湭妫€娴嬪埌涓嶈ˉEnter');
+  console.log('[MES] 条码回车独立后台服务已启动：只检测loading，未检测到不补Enter');
 }
 
 
@@ -1291,64 +1305,65 @@ function buildPanel() {
 
   box.innerHTML =
    '<div id="tm-head" style="font-weight:600;margin-bottom:8px;cursor:move;display:flex;align-items:center;justify-content:space-between;gap:6px;">' +
-  '<span>82023703MES涓撶敤</span>' +
+  '<span>82023703MES专用</span>' +
   '<div style="display:flex;align-items:center;gap:6px;cursor:default;font-weight:400;">' +
-    '<label title="淇濇寔w3鐧诲綍鎬? style="white-space:nowrap;"><input id="tm-keepalive-on" type="checkbox"> 淇濇寔W3鐧诲叆</label>' +
-    '<span id="tm-keepalive-status" style="color:#666;">鍏?/span>' +
-    '<button id="tm-toggle" style="border:0;background:#f0f0f0;border-radius:6px;padding:2px 8px;cursor:pointer;">鏈€灏忓寲</button>' +
+    '<label title="保持w3登录态" style="white-space:nowrap;"><input id="tm-keepalive-on" type="checkbox"> 保持W3登入</label>' +
+    '<span id="tm-keepalive-status" style="color:#666;">关</span>' +
+    '<button id="tm-toggle" style="border:0;background:#f0f0f0;border-radius:6px;padding:2px 8px;cursor:pointer;">最小化</button>' +
   '</div>' +
 '</div>' +
 
     '<div id="tm-body">' +
-    '<div>浠诲姟浠わ紝鍙矘璐存帓浜ф枃鏈紝鑷姩杩囨护浠诲姟浠?/div>' +
-'<textarea id="tm-taskno" style="width:100%;height:38px;min-height:32px;max-height:90px;resize:vertical;box-sizing:border-box;margin:4px 0 8px;" placeholder="鍙緭鍏ュ涓换鍔′护锛屾垨绮樿创鎺掍骇鏂囨湰"></textarea>' +
+    '<div>任务令，可粘贴排产文本，自动过滤任务令</div>' +
+'<textarea id="tm-taskno" style="width:100%;height:38px;min-height:32px;max-height:90px;resize:vertical;box-sizing:border-box;margin:4px 0 8px;" placeholder="可输入多个任务令，或粘贴排产文本"></textarea>' +
 
 '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-'<button id="tm-paste-task">绮樿创鍓创鏉?/button>' +
- '<button id="tm-extract-api">鎺ュ彛鎻愬彇</button>' +
-'<button id="tm-extract-run">鎻愬彇鏉＄爜</button>' +
+'<button id="tm-paste-task">粘贴剪贴板</button>' +
+ '<button id="tm-extract-api">接口提取</button>' +
+'<button id="tm-extract-run">提取条码</button>' +
 
 '</div>' +
 
 
       '<hr style="margin:10px 0;">' +
-      '<div>鎵归噺鏉＄爜鍒楄〃锛堟瘡琛屼竴涓級</div>' +
+      '<div>批量条码列表（每行一个）</div>' +
       '<textarea id="tm-batch-input" style="width:100%;height:110px;box-sizing:border-box;"></textarea>' +
     '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
-'<button id="tm-load">杞藉叆</button>' +
-'<button id="tm-start">寮€濮?/button>' +
-'<button id="tm-pause">鏆傚仠</button>' +
-'<button id="tm-reset">閲嶇疆</button>' +
-'<label title="鎵爜鏋緭鍏ユ潯鐮佸苟瑙﹀彂鐪熷疄Enter鍚庯紝绛夊緟浜у搧杩涚珯鎴愬姛锛屽啀鑷姩琛ヤ竴涓狤nter" style="white-space:nowrap;">' +
-'<input id="tm-barcode-enter-on" type="checkbox"> 鏉＄爜鍥炶溅' +
+'<button id="tm-load">载入</button>' +
+'<button id="tm-start">开始</button>' +
+'<button id="tm-pause">暂停</button>' +
+'<button id="tm-reset">重置</button>' +
+'<label title="扫码枪输入条码并触发真实Enter后，等待产品进站成功，再自动补一个Enter" style="white-space:nowrap;">' +
+'<input id="tm-barcode-enter-on" type="checkbox"> 条码回车' +
 '</label>' +
 '</div>' +
 
           '<hr style="margin:10px 0;">' +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-      '<label title="缂栫爜涓嶄竴鑷存椂閿佸畾褰撳墠SN妗?><input id="tm-sn-lock-on" type="checkbox"> SN鎷︽埅</label>' +
-      '<label title="SN鎵敊浣嶇疆鏃惰嚜鍔ㄨ浆濉埌瀵瑰簲缂栫爜琛?><input id="tm-sn-route-on" type="checkbox"> SN褰掍綅</label>' +
-      '<label title="BOM瀛愰」鏍￠獙閫氳繃鍚庯紝杩樿ATE娴嬭瘯閫氳繃鎵嶈繃绔?><input id="tm-pass-mode-bom-ate" name="tm-pass-mode" type="radio" value="bom_ate"> 鏍￠獙+ATE</label>' +
-      '<label title="鍙BOM瀛愰」鏍￠獙閫氳繃灏辫繃绔欙紝涓嶆煡ATE"><input id="tm-pass-mode-bom-only" name="tm-pass-mode" type="radio" value="bom_only"> 鍙牎楠?/label>' +
+      '<label title="编码不一致时锁定当前SN框"><input id="tm-sn-lock-on" type="checkbox"> SN拦截</label>' +
+      '<label title="SN扫错位置时自动转填到对应编码行"><input id="tm-sn-route-on" type="checkbox"> SN归位</label>' +
+      '<label title="BOM子项校验通过后，还要ATE测试通过才过站"><input id="tm-pass-mode-bom-ate" name="tm-pass-mode" type="radio" value="bom_ate"> 校验+ATE</label>' +
+      '<label title="只要BOM子项校验通过就过站，不查ATE"><input id="tm-pass-mode-bom-only" name="tm-pass-mode" type="radio" value="bom_only"> 只校验</label>' +
       '</div>' +
-      '<div id="tm-sn-status" style="margin-top:4px;color:#666;">SN鏍￠獙锛氬緟鍛?/div>' +
-      '<div id="tm-pass-mode-status" style="margin-top:2px;color:#666;">杩囩珯妯″紡锛氬緟鍛?/div>' +
+      '<div id="tm-sn-status" style="margin-top:4px;color:#666;">SN校验：待命</div>' +
+      '<div id="tm-pass-mode-status" style="margin-top:2px;color:#666;">过站模式：待命</div>' +
 
 
-      '<div style="margin-top:8px;">杩涘害锛?span id="tm-batch-progress">0/0</span></div>' +
-      '<div id="tm-batch-status" style="margin-top:4px;color:#333;">寰呭懡</div>' +
+      '<div style="margin-top:8px;">进度：<span id="tm-batch-progress">0/0</span></div>' +
+      '<div id="tm-batch-status" style="margin-top:4px;color:#333;">待命</div>' +
     '</div>';
 
   document.body.appendChild(box);
 
-  // 鎶樺彔/灞曞紑 + 鐘舵€佽蹇?  var bodyWrap = box.querySelector('#tm-body');
+  // 折叠/展开 + 状态记忆
+  var bodyWrap = box.querySelector('#tm-body');
   var toggleBtn = box.querySelector('#tm-toggle');
   var keepAliveOn = box.querySelector('#tm-keepalive-on');
 
   var st = loadPanelState();
   var collapsed = !!st.collapsed;
 
-  // 鎮诞鐞冿紙绠€鐗堬級
+  // 悬浮球（简版）
   var fab = document.createElement('div');
   fab.id = 'tm-fab';
   fab.textContent = 'qiu';
@@ -1367,23 +1382,24 @@ function buildPanel() {
   fab.style.cursor = 'pointer';
   fab.style.zIndex = '1000001';
   fab.style.boxShadow = '0 6px 18px rgba(0,0,0,.25)';
-  fab.title = '鐐瑰嚮灞曞紑闈㈡澘';
+  fab.title = '点击展开面板';
   document.body.appendChild(fab);
 
   function applyCollapsed() {
     bodyWrap.style.display = collapsed ? 'none' : '';
-    toggleBtn.textContent = collapsed ? '灞曞紑' : '鏈€灏忓寲';
+    toggleBtn.textContent = collapsed ? '展开' : '最小化';
     box.style.width = collapsed ? '220px' : '360px';
   }
   applyCollapsed();
-// 淇濇寔鐧诲叆鍒濆鍖?(function initKeepAliveSwitch() {
+// 保持登入初始化
+(function initKeepAliveSwitch() {
   var kc = loadKeepAliveCfg();
 
   keepAliveOn.checked = !!kc.enabled;
 
   var stEl = box.querySelector('#tm-keepalive-status');
   if (stEl) {
-    stEl.textContent = keepAliveOn.checked ? '鍚姩涓? : '鍏?;
+    stEl.textContent = keepAliveOn.checked ? '启动中' : '关';
     stEl.style.color = keepAliveOn.checked ? '#1677ff' : '#666';
   }
 
@@ -1399,14 +1415,14 @@ function buildPanel() {
 
     var el = box.querySelector('#tm-keepalive-status');
     if (el) {
-      el.textContent = keepAliveOn.checked ? '鍚姩涓? : '鍏?;
+      el.textContent = keepAliveOn.checked ? '启动中' : '关';
       el.style.color = keepAliveOn.checked ? '#1677ff' : '#666';
     }
   });
 
   restartKeepAlive();
 })();
-var keepAliveLabel = box.querySelector('label[title="淇濇寔w3鐧诲綍鎬?]');
+var keepAliveLabel = box.querySelector('label[title="保持w3登录态"]');
 if (keepAliveLabel) {
   keepAliveLabel.addEventListener('mousedown', function (e) {
     e.stopPropagation();
@@ -1442,7 +1458,7 @@ if (keepAliveOn) {
     savePanelState({ collapsed: false });
   };
 
-  // 鎷栨嫿
+  // 拖拽
   (function makeDrag(panel, head) {
     var down = false, sx = 0, sy = 0, ox = 0, oy = 0;
     head.addEventListener('mousedown', function (e) {
@@ -1469,7 +1485,7 @@ if (keepAliveOn) {
     });
   })(box, box.querySelector('#tm-head'));
 
-  // 鎭㈠涓婃浣嶇疆
+  // 恢复上次位置
   if (typeof st.left === 'number' && typeof st.top === 'number') {
     box.style.left = Math.max(0, st.left) + 'px';
     box.style.top = Math.max(0, st.top) + 'px';
@@ -1477,7 +1493,8 @@ if (keepAliveOn) {
     box.style.bottom = 'auto';
   }
 
-  // 棣栨鍔犺浇濡傛灉涓婃鏄姌鍙狅紝鐩存帴鏄剧ず鎮诞鐞?  if (collapsed) {
+  // 首次加载如果上次是折叠，直接显示悬浮球
+  if (collapsed) {
     box.style.display = 'none';
     fab.style.display = 'flex';
   }
@@ -1498,7 +1515,7 @@ if (keepAliveOn) {
 
     var s = box.querySelector('#tm-sn-status');
     if (s) {
-      s.textContent = 'SN鏍￠獙锛氭嫤鎴? + (snLockOn.checked ? '寮€' : '鍏?) + ' / 褰掍綅' + (snRouteOn.checked ? '寮€' : '鍏?);
+      s.textContent = 'SN校验：拦截' + (snLockOn.checked ? '开' : '关') + ' / 归位' + (snRouteOn.checked ? '开' : '关');
       s.style.color = (snLockOn.checked || snRouteOn.checked) ? '#389e0d' : '#666';
     }
   }
@@ -1510,15 +1527,15 @@ if (keepAliveOn) {
     var s = box.querySelector('#tm-pass-mode-status');
     if (s) {
       if (mode === AUTO_PASS_MODE_BOM_ONLY) {
-        s.textContent = '杩囩珯锛氬彧鏍￠獙';
+        s.textContent = '过站：只校验';
         s.style.color = '#fa8c16';
       } else {
-        s.textContent = '杩囩珯锛氭牎楠?ATE';
+        s.textContent = '过站：校验+ATE';
         s.style.color = '#389e0d';
       }
     }
 
-    console.log('[MES] 鑷姩杩囩珯妯″紡:', mode);
+    console.log('[MES] 自动过站模式:', mode);
   }
 
   function initAutoPassModeUi() {
@@ -1541,7 +1558,7 @@ if (keepAliveOn) {
   snRouteOn.addEventListener('change', applySnCfgNow);
   passModeBomAte.addEventListener('change', applyAutoPassModeNow);
   passModeBomOnly.addEventListener('change', applyAutoPassModeNow);
-// 鏉＄爜鍥炶溅寮€鍏冲垵濮嬪寲
+// 条码回车开关初始化
 if (barcodeEnterOn) {
   barcodeEnterOn.checked = localStorage.getItem(BARCODE_ENTER_KEY) === '1';
 
@@ -1552,7 +1569,7 @@ if (barcodeEnterOn) {
     barcodeEnterSuccessCountBefore = 0;
 
     setStatus(
-      '鏉＄爜鍥炶溅锛? + (barcodeEnterOn.checked ? '寮€' : '鍏?),
+      '条码回车：' + (barcodeEnterOn.checked ? '开' : '关'),
       barcodeEnterOn.checked ? '#389e0d' : '#666'
     );
 
@@ -1570,7 +1587,7 @@ if (barcodeEnterOn) {
   box.querySelector('#tm-paste-task').onclick = async function () {
     try {
       if (!navigator.clipboard || !navigator.clipboard.readText) {
-        setStatus('娴忚鍣ㄤ笉鏀寔鐩存帴璇诲彇鍓创鏉匡紝璇锋墜鍔?Ctrl+V', '#fa8c16');
+        setStatus('浏览器不支持直接读取剪贴板，请手动 Ctrl+V', '#fa8c16');
         try {
           taskInput.focus();
           taskInput.select();
@@ -1581,7 +1598,7 @@ if (barcodeEnterOn) {
       var text = await navigator.clipboard.readText();
 
       if (!text) {
-        setStatus('鍓创鏉夸负绌?, '#fa8c16');
+        setStatus('剪贴板为空', '#fa8c16');
         return;
       }
 
@@ -1592,14 +1609,14 @@ if (barcodeEnterOn) {
       var taskNos = parseTaskNos(text);
 
       if (taskNos.length) {
-        setStatus('宸茬矘璐达紝璇嗗埆鍒颁换鍔′护 ' + taskNos.length + ' 涓?, '#389e0d');
-        console.log('[TASK-NO] 璇嗗埆鍒颁换鍔′护:', taskNos);
+        setStatus('已粘贴，识别到任务令 ' + taskNos.length + ' 个', '#389e0d');
+        console.log('[TASK-NO] 识别到任务令:', taskNos);
       } else {
-        setStatus('宸茬矘璐达紝浣嗘湭璇嗗埆鍒颁换鍔′护', '#fa8c16');
+        setStatus('已粘贴，但未识别到任务令', '#fa8c16');
       }
     } catch (e) {
-      console.error('[TASK-NO] 璇诲彇鍓创鏉垮け璐?', e);
-      setStatus('璇诲彇鍓创鏉垮け璐ワ紝璇锋墜鍔?Ctrl+V', '#cf1322');
+      console.error('[TASK-NO] 读取剪贴板失败:', e);
+      setStatus('读取剪贴板失败，请手动 Ctrl+V', '#cf1322');
 
       try {
         taskInput.focus();
@@ -1610,39 +1627,39 @@ if (barcodeEnterOn) {
 
   box.querySelector('#tm-extract-run').onclick = async function () {
     var taskNos = parseTaskNos(taskInput.value);
-    if (!taskNos.length) return setStatus('鏈瘑鍒埌浠诲姟浠?, '#cf1322');
+    if (!taskNos.length) return setStatus('未识别到任务令', '#cf1322');
 
-    // 鍥哄畾閾炬帴鎻愬彇淇濇寔鍘熼€昏緫锛屽彧鍙栫涓€涓换鍔′护
+    // 固定链接提取保持原逻辑，只取第一个任务令
     var taskNo = taskNos[0];
 
     if (taskNos.length > 1) {
-      setStatus('鍥哄畾鎻愬彇鍙娇鐢ㄧ涓€涓换鍔′护锛? + taskNo + '锛屽涓鐢ㄦ帴鍙ｆ彁鍙?, '#fa8c16');
+      setStatus('固定提取只使用第一个任务令：' + taskNo + '，多个请用接口提取', '#fa8c16');
     }
 
     var jobId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     await GM_setValue(KEY_JOB, { jobId: jobId, taskNo: taskNo, ts: Date.now() });
 
     GM_openInTab(FIXED_UI_URL, { active: true, insert: true, setParent: true });
-    setStatus('宸叉墦寮€鍥哄畾鎻愬彇椤靛苟鍙戦€佷换鍔★細' + taskNo);
+    setStatus('已打开固定提取页并发送任务：' + taskNo);
   };
 
       box.querySelector('#tm-extract-api').onclick = async function () {
     var taskNos = parseTaskNos(taskInput.value);
 
     if (!taskNos.length) {
-      return setStatus('鏈瘑鍒埌浠诲姟浠?, '#cf1322');
+      return setStatus('未识别到任务令', '#cf1322');
     }
 
     try {
-      setStatus('璇嗗埆鍒颁换鍔′护 ' + taskNos.length + ' 涓紝鎺ュ彛鎵归噺鎻愬彇涓?..', '#1677ff');
+      setStatus('识别到任务令 ' + taskNos.length + ' 个，接口批量提取中...', '#1677ff');
 
       var ret = await extractTaskCodesByApi(taskNos);
       var codes = ret.codes || [];
 
       if (!codes.length) {
-        setStatus('鎺ュ彛鏈彁鍙栧埌鏉＄爜锛氫换鍔′护' + taskNos.length + '涓?, '#fa8c16');
-        console.log('[TASK-SN-API] 鏈彁鍙栧埌锛屼换鍔′护:', taskNos);
-        console.log('[TASK-SN-API] 鏌ヨ缁勫悎:', ret.hitInfo);
+        setStatus('接口未提取到条码：任务令' + taskNos.length + '个', '#fa8c16');
+        console.log('[TASK-SN-API] 未提取到，任务令:', taskNos);
+        console.log('[TASK-SN-API] 查询组合:', ret.hitInfo);
         return;
       }
 
@@ -1650,7 +1667,8 @@ if (barcodeEnterOn) {
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       ta.dispatchEvent(new Event('change', { bubbles: true }));
 
-      // 鑷姩杞藉叆鍒版壒閲忛槦鍒?      queue = parseCodes(ta.value);
+      // 自动载入到批量队列
+      queue = parseCodes(ta.value);
       idx = 0;
       running = false;
       waiting = false;
@@ -1659,19 +1677,19 @@ if (barcodeEnterOn) {
       setProgress();
 
       setStatus(
-        '鎺ュ彛鎻愬彇鎴愬姛锛氫换鍔′护' + ret.taskCount +
-        '涓紝鏉＄爜' + queue.length +
-        '鏉★紝宸茶嚜鍔ㄨ浇鍏?,
+        '接口提取成功：任务令' + ret.taskCount +
+        '个，条码' + queue.length +
+        '条，已自动载入',
         '#389e0d'
       );
 
-      console.log('[TASK-SN-API] 浠诲姟浠?', ret.taskNos);
-      console.log('[TASK-SN-API] 鏌ヨ缁勫悎:', ret.hitInfo);
-      console.log('[TASK-SN-API] SN鏁伴噺:', queue.length);
+      console.log('[TASK-SN-API] 任务令:', ret.taskNos);
+      console.log('[TASK-SN-API] 查询组合:', ret.hitInfo);
+      console.log('[TASK-SN-API] SN数量:', queue.length);
 
     } catch (e) {
-      console.error('[TASK-SN-API] 鎺ュ彛鎻愬彇澶辫触:', e);
-      setStatus('鎺ュ彛鎻愬彇澶辫触锛? + (e && e.message ? e.message : String(e)), '#cf1322');
+      console.error('[TASK-SN-API] 接口提取失败:', e);
+      setStatus('接口提取失败：' + (e && e.message ? e.message : String(e)), '#cf1322');
     }
   };
 
@@ -1682,54 +1700,58 @@ if (barcodeEnterOn) {
     queue = parseCodes(ta.value);
     idx = 0; running = false; waiting = false; currentCode = '';
     setProgress();
-    setStatus('宸茶浇鍏?' + queue.length + ' 鏉?);
+    setStatus('已载入 ' + queue.length + ' 条');
   };
 
   box.querySelector('#tm-start').onclick = function () {
-    if (!queue.length) return setStatus('璇峰厛杞藉叆鏉＄爜', '#cf1322');
+    if (!queue.length) return setStatus('请先载入条码', '#cf1322');
     running = true;
-       localStorage.setItem('MES_BATCH_RUNNING_FLAG', '1'); // 銆愬姞杩欒锛氭墦涓婃壒閲忔殫鍙枫€?    setStatus('寮€濮嬫墽琛?..', '#1677ff');
+       localStorage.setItem('MES_BATCH_RUNNING_FLAG', '1'); // 【加这行：打上批量暗号】
+    setStatus('开始执行...', '#1677ff');
   };
 
   box.querySelector('#tm-pause').onclick = function () {
     running = false; waiting = false;
-    localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 銆愬姞杩欒锛氬彇娑堟殫鍙枫€?    setStatus('宸叉殏鍋?, '#fa8c16');
+    localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 【加这行：取消暗号】
+    setStatus('已暂停', '#fa8c16');
   };
 
   box.querySelector('#tm-reset').onclick = function () {
     running = false; waiting = false; idx = 0; currentCode = '';
-    localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 銆愬姞杩欒锛氬彇娑堟殫鍙枫€?    setProgress();
-    setStatus('宸查噸缃?);
+    localStorage.setItem('MES_BATCH_RUNNING_FLAG', '0'); // 【加这行：取消暗号】
+    setProgress();
+    setStatus('已重置');
   };
   if (typeof GM_addValueChangeListener === 'function') {
     GM_addValueChangeListener(KEY_RESULT, function (_k, _o, r) {
       if (!r) return;
-      if (!r.ok) return setStatus('鎻愬彇澶辫触锛? + (r.err || '鏈煡閿欒'), '#cf1322');
+      if (!r.ok) return setStatus('提取失败：' + (r.err || '未知错误'), '#cf1322');
 
       ta.value = (r.codes || []).join('\n');
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       ta.dispatchEvent(new Event('change', { bubbles: true }));
 
-      // 鑷姩杞藉叆
+      // 自动载入
       queue = parseCodes(ta.value);
       idx = 0; running = false; waiting = false; currentCode = '';
       setProgress();
 
-      setStatus('鎻愬彇鎴愬姛锛? + queue.length + ' 鏉★紝宸茶嚜鍔ㄨ浇鍏?, '#1677ff');
+      setStatus('提取成功：' + queue.length + ' 条，已自动载入', '#1677ff');
     });
   }
 
-  // SN 寮€鍏冲垵濮嬪寲
+  // SN 开关初始化
   snLockOn.checked = localStorage.getItem(SN_LOCK_KEY) === '1';
   snRouteOn.checked = localStorage.getItem(SN_ROUTE_KEY) !== '0';
   applySnCfgNow();
 
-  // 鑷姩杩囩珯妯″紡鍒濆鍖?  initAutoPassModeUi();
+  // 自动过站模式初始化
+  initAutoPassModeUi();
 
 setInterval(function () { tick(); }, tickMs);
 
-// 鏉＄爜鍥炶溅妫€娴嬪凡绉诲姩鍒扮嫭绔嬪悗鍙版湇鍔?startBarcodeEnterBackgroundService()
-// 涓嶈鍦ㄨ繖閲岄噸澶嶅惎鍔紝閬垮厤閲嶅鎵ц
+// 条码回车检测已移动到独立后台服务 startBarcodeEnterBackgroundService()
+// 不要在这里重复启动，避免重复执行
 
 
 }
