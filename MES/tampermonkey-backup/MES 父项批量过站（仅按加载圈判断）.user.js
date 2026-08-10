@@ -1,7 +1,9 @@
 // ==UserScript==
-// @name         MES 鐖堕」鎵归噺杩囩珯锛堜粎鎸夊姞杞藉湀鍒ゆ柇锛?// @namespace    http://tampermonkey.net/
+// @name         MES 父项批量过站（仅按加载圈判断）
+// @namespace    http://tampermonkey.net/
 // @version      1.4
-// @description  浠呮牴鎹?#global_toploading_flag 鍑虹幇->娑堝け 鍒ゆ柇涓€鏉″畬鎴?// @match        *://*/*
+// @description  仅根据 #global_toploading_flag 出现->消失 判断一条完成
+// @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
@@ -21,8 +23,8 @@
   let currentCode = '';
   let ticking = false;
 
-  let sawLoading = false;       // 鏈潯鏄惁瑙佽繃loading鏄剧ず
-  let loadingGoneCount = 0;     // loading娑堝け杩炵画璁℃暟锛堟姉鎶栵級
+  let sawLoading = false;       // 本条是否见过loading显示
+  let loadingGoneCount = 0;     // loading消失连续计数（抗抖）
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -31,7 +33,7 @@
     for (const el of all) {
       const box = el.closest('div[id^="Input_"]');
       const ctx = ((box?.parentElement?.innerText || box?.innerText || '')).replace(/\s+/g, '');
-      if (ctx.includes('鏉＄爜閲囬泦')) return el;
+      if (ctx.includes('条码采集')) return el;
     }
     return all[fallbackIndex] || null;
   }
@@ -49,7 +51,7 @@
       el.textContent = msg;
       el.style.color = color;
     }
-    console.log('[鎵归噺杩囩珯]', msg);
+    console.log('[批量过站]', msg);
   }
 
   function setProgress() {
@@ -64,7 +66,7 @@
   async function submitOne(code) {
     const input = getParentInput();
     if (!input) {
-      setStatus('鏈壘鍒扳€滄潯鐮侀噰闆嗏€濊緭鍏ユ', '#cf1322');
+      setStatus('未找到“条码采集”输入框', '#cf1322');
       running = false;
       return false;
     }
@@ -102,7 +104,7 @@
           if (sawLoading) loadingGoneCount++;
         }
 
-        // 瑙佽繃loading鍚庯紝杩炵画3娆℃娴嬮兘宸叉秷澶?-> 鍒ゅ畾瀹屾垚
+        // 见过loading后，连续3次检测都已消失 -> 判定完成
         if (sawLoading && loadingGoneCount >= 3) {
           waiting = false;
           idx++;
@@ -114,7 +116,7 @@
         if (Date.now() - waitStart > maxWaitMs) {
           running = false;
           waiting = false;
-          setStatus(`绗?@@@MATH_INLINE_1_END@@@{currentCode}锛屽凡鏆傚仠`, '#cf1322');
+          setStatus(`第 @@@MATH_INLINE_1_END@@@{currentCode}，已暂停`, '#cf1322');
           return;
         }
         return;
@@ -122,7 +124,7 @@
 
       if (idx >= queue.length) {
         running = false;
-        setStatus(`瀹屾垚锛氬叡 ${queue.length} 鏉, '#389e0d');
+        setStatus(`完成：共 ${queue.length} 条`, '#389e0d');
         return;
       }
 
@@ -135,7 +137,7 @@
 
       waiting = true;
       waitStart = Date.now();
-      setStatus(`鎻愪氦涓?(@@@MATH_INLINE_2_END@@@{queue.length})锛?{currentCode}`, '#1677ff');
+      setStatus(`提交中 (@@@MATH_INLINE_2_END@@@{queue.length})：${currentCode}`, '#1677ff');
     } finally {
       ticking = false;
     }
@@ -150,16 +152,16 @@
       font-size: 12px; padding: 10px;
     `;
     box.innerHTML = `
-      <div style="font-weight:600;margin-bottom:8px;">鐖堕」鎵归噺杩囩珯锛堜粎loading锛?/div>
-      <textarea id="tm-batch-input" placeholder="姣忚涓€涓潯鐮? style="width:100%;height:110px;box-sizing:border-box;"></textarea>/g
+      <div style="font-weight:600;margin-bottom:8px;">父项批量过站（仅loading）</div>
+      <textarea id="tm-batch-input" placeholder="每行一个条码" style="width:100%;height:110px;box-sizing:border-box;"></textarea>/g
       <div style="margin-top:8px;display:flex;gap:6px;">
-        <button id="tm-load">杞藉叆</button>
-        <button id="tm-start">寮€濮?/button>
-        <button id="tm-pause">鏆傚仠</button>
-        <button id="tm-reset">閲嶇疆</button>
+        <button id="tm-load">载入</button>
+        <button id="tm-start">开始</button>
+        <button id="tm-pause">暂停</button>
+        <button id="tm-reset">重置</button>
       </div>
-      <div style="margin-top:8px;">杩涘害锛?span id="tm-batch-progress">0/0</span></div>
-      <div id="tm-batch-status" style="margin-top:4px;">寰呭懡</div>
+      <div style="margin-top:8px;">进度：<span id="tm-batch-progress">0/0</span></div>
+      <div id="tm-batch-status" style="margin-top:4px;">待命</div>
     `;
     document.body.appendChild(box);
 
@@ -167,21 +169,21 @@
       queue = parseCodes(document.getElementById('tm-batch-input').value);
       idx = 0; running = false; waiting = false; currentCode = '';
       setProgress();
-      setStatus(`宸茶浇鍏?${queue.length} 鏉);
+      setStatus(`已载入 ${queue.length} 条`);
     };
     document.getElementById('tm-start').onclick = () => {
-      if (!queue.length) return setStatus('璇峰厛杞藉叆鏉＄爜', '#cf1322');
+      if (!queue.length) return setStatus('请先载入条码', '#cf1322');
       running = true;
-      setStatus('寮€濮嬫墽琛?..', '#1677ff');
+      setStatus('开始执行...', '#1677ff');
     };
     document.getElementById('tm-pause').onclick = () => {
       running = false; waiting = false;
-      setStatus('宸叉殏鍋?, '#fa8c16');
+      setStatus('已暂停', '#fa8c16');
     };
     document.getElementById('tm-reset').onclick = () => {
       running = false; waiting = false; idx = 0; currentCode = '';
       setProgress();
-      setStatus('宸查噸缃?);
+      setStatus('已重置');
     };
   }
 
