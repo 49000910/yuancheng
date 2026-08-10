@@ -1,7 +1,7 @@
 
 
 // ==UserScript==
-// @name         SN缂栫爜鑷姩鏍￠獙锛堟棤闈㈡澘鐗堬紝榧犳爣鎮诞鐧藉簳淇℃伅鍗★級
+// @name         SN编码自动校验（无面板版，鼠标悬浮白底信息卡）
 // @namespace    tm.sn.code.check.no.panel.hover.white
 // @version      2.7.1
 // @match        https://w3.huawei.com/mespmm/wipweb*
@@ -11,7 +11,7 @@
 (async function () {
   'use strict';
 
-  // ===== MES鎺堟潈闂ㄧ START =====
+  // ===== MES授权门禁 START =====
   async function __MES_AUTH_GATE__() {
     if (
       location.hostname === 'mes.huawei.com' &&
@@ -29,7 +29,7 @@
         var st = JSON.parse(localStorage.getItem(KEY) || 'null');
 
         if (st && st.ok && Date.now() - Number(st.ts || 0) < 10000) {
-          console.log('[MES鎺堟潈闂ㄧ] 宸叉巿鏉冿紝鑴氭湰缁х画杩愯锛?, st.jobNumber);
+          console.log('[MES授权门禁] 已授权，脚本继续运行：', st.jobNumber);
           return true;
         }
       } catch (e) {}
@@ -39,12 +39,12 @@
       });
     }
 
-    console.warn('[MES鎺堟潈闂ㄧ] 鏈巿鏉冿紝鑴氭湰宸插仠姝㈣繍琛?);
+    console.warn('[MES授权门禁] 未授权，脚本已停止运行');
     return false;
   }
 
   if (!(await __MES_AUTH_GATE__())) return;
-  // ===== MES鎺堟潈闂ㄧ END =====
+  // ===== MES授权门禁 END =====
 
   if (!location.href.includes('#/ProductTrackInOut')) return;
 
@@ -52,11 +52,12 @@
   const BASE = 'https://w3.huawei.com/mespmm/gateway/com.huawei.supply.mes.mesplus.pspw:mespmmpreallservice/mespmmpreallone/services/emsComponentDataInfo/find/page';
   const selector = 'input[id^="sn-input"]';
 
-  // 鐢卞埆鐨勮剼鏈潰鏉挎帶鍒?  const LOCK_SWITCH_KEY = 'sn_code_check_lock_on';
+  // 由别的脚本面板控制
+  const LOCK_SWITCH_KEY = 'sn_code_check_lock_on';
   const AUTO_ROUTE_KEY = 'sn_code_auto_route_on';
-// 宸︿晶鏉＄爜娓呮礂瑙勫垯锛岀敱鍏滃簳鑴氭湰璁剧疆
+// 左侧条码清洗规则，由兜底脚本设置
 const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
-// ===== 鐖堕」鏉＄爜-BOM-SN閲囬泦璁板綍 =====
+// ===== 父项条码-BOM-SN采集记录 =====
 const BOM_COLLECT_STORE_KEY = 'sn_bom_collect_store_v1';
 const BOM_COLLECT_MAX_PARENT = 500;
 const bomCollectUnlockMap = new WeakMap();
@@ -70,14 +71,14 @@ const bomCollectUnlockMap = new WeakMap();
   const rowBubbleKeys = new Set();
   const lastScanByInput = new WeakMap();
   const lastNonEmptyScanByInput = new WeakMap();
-  // ===== SN閲嶅閿佸畾锛氱粺涓€鏀惧湪鑴氭湰1锛岄伩鍏嶅拰鑷姩杞～鍐茬獊 =====
+  // ===== SN重复锁定：统一放在脚本1，避免和自动转填冲突 =====
   let dupLockedEl = null;
   let dupSuppressUntil = 0;
 
-  // 宸︿晶绾㈣壊鎷彿DOM
+  // 左侧红色括号DOM
   const dupBracketEls = [];
 
-  // 琚贰绾㈡爣璁拌繃鐨勯噸澶嶆
+  // 被淡红标记过的重复框
   const dupPaintEls = new Set();
 
   function suppressDuplicateLockForRoute(ms) {
@@ -122,7 +123,7 @@ const bomCollectUnlockMap = new WeakMap();
     el.style.boxShadow = '';
     el.style.color = '';
 
-    if (el.title && el.title.indexOf('閲嶅鏉＄爜') >= 0) {
+    if (el.title && el.title.indexOf('重复条码') >= 0) {
       el.title = '';
     }
 
@@ -141,12 +142,12 @@ const bomCollectUnlockMap = new WeakMap();
 
     el.dataset.snDupPaint = '1';
 
-    // 缁熶竴娣＄孩鑹诧紝涓嶅啀鏈夊崟涓娣辩孩
+    // 统一淡红色，不再有单个框深红
     el.style.outline = '1px solid #d4380d';
     el.style.backgroundColor = '#fff1f0';
     el.style.boxShadow = '0 0 0 1px rgba(212,56,13,.12)';
     el.style.color = '#000';
-    el.title = '閲嶅鏉＄爜锛? + key;
+    el.title = '重复条码：' + key;
 
     dupPaintEls.add(el);
   }
@@ -198,16 +199,16 @@ const bomCollectUnlockMap = new WeakMap();
       minLeft = Math.min(minLeft, items[j].rect.left);
     }
 
-    // 绾㈣壊鎷彿鍙傛暟
-    // 绾跨矖 3锛屾í绾跨煭锛屾棤宸︿晶鏍囩
+    // 红色括号参数
+    // 线粗 3，横线短，无左侧标签
     var lineWidth = 3;
     var armLen = 11;
     var bracketLeft = Math.max(4, minLeft - 22);
 
-    // 涓婄煭妯榻愭渶涓婇噸澶嶆涓績
+    // 上短横对齐最上重复框中心
     var topCenter = first.centerY;
 
-    // 涓嬬煭妯榻愭渶涓嬮噸澶嶆涓績
+    // 下短横对齐最下重复框中心
     var bottomCenter = last.centerY;
 
     if (bottomCenter - topCenter < 18) {
@@ -216,7 +217,7 @@ const bomCollectUnlockMap = new WeakMap();
       bottomCenter = mid + 9;
     }
 
-    // 绔栫嚎
+    // 竖线
     addDupLine(
       bracketLeft,
       topCenter,
@@ -224,14 +225,16 @@ const bomCollectUnlockMap = new WeakMap();
       bottomCenter - topCenter
     );
 
-    // 涓婄煭妯?    addDupLine(
+    // 上短横
+    addDupLine(
       bracketLeft,
       topCenter - lineWidth / 2,
       armLen,
       lineWidth
     );
 
-    // 涓嬬煭妯?    addDupLine(
+    // 下短横
+    addDupLine(
       bracketLeft,
       bottomCenter - lineWidth / 2,
       armLen,
@@ -265,7 +268,7 @@ const bomCollectUnlockMap = new WeakMap();
 
     for (var i = 0; i < els.length; i++) {
       var st = rowBubbleMap.get(els[i]);
-     if (st && st.text && st.text.indexOf('閲嶅鏉＄爜') >= 0) {
+     if (st && st.text && st.text.indexOf('重复条码') >= 0) {
   removeRowBubble(els[i]);
 }
 
@@ -275,7 +278,7 @@ const bomCollectUnlockMap = new WeakMap();
   function refreshDuplicateLock(preferEl) {
     if (isDuplicateLockSuppressed()) return false;
 
-    // 姣忔鍏堟竻鎺夋棫鎷彿鍜屾棫娣＄孩
+    // 每次先清掉旧括号和旧淡红
     clearDupBrackets();
     clearAllDupPaint();
 
@@ -293,22 +296,24 @@ const bomCollectUnlockMap = new WeakMap();
       for (var i = 0; i < arr.length; i++) {
         paintDup(arr[i], key);
 
-        // 褰撳墠杈撳叆妗嗗湪閲嶅缁勯噷锛屼紭鍏堟妸鍙充晶姘旀场鎸傚綋鍓嶆
+        // 当前输入框在重复组里，优先把右侧气泡挂当前框
         if (preferEl && arr[i] === preferEl) {
           targetEl = preferEl;
           targetKey = key;
         }
 
-        // 娌℃湁浼樺厛鐩爣鏃讹紝閿佺涓€涓噸澶嶆
+        // 没有优先目标时，锁第一个重复框
         if (!targetEl) {
           targetEl = arr[i];
           targetKey = key;
         }
 
-               // 涓嶈鍦ㄨ繖閲屽啓 fail锛岄伩鍏嶄复鏃堕噸澶嶈В闄ゅ悗鐘舵€佹畫鐣?        // 閲嶅鍒ゆ柇浜ょ粰 publishSnCheckGate() 鍔ㄦ€佺粺璁?
+               // 不要在这里写 fail，避免临时重复解除后状态残留
+        // 重复判断交给 publishSnCheckGate() 动态统计
+
       }
 
-      // 宸︿晶绾㈣壊鎷彿锛屾棤鏂囧瓧
+      // 左侧红色括号，无文字
       drawDupBracketForGroup(arr);
     });
 
@@ -318,7 +323,9 @@ const bomCollectUnlockMap = new WeakMap();
       clearAllDupPaint();
       removeDuplicateBubblesIfNeeded();
 
-      // 淇锛氬鏋滀箣鍓嶅洜涓轰复鏃堕噸澶嶅啓鍏ヨ繃 fail/閲嶅鏉＄爜锛?      // 浣嗗綋鍓嶅疄闄呭凡缁忔病鏈夐噸澶嶏紝鍒欓噸鏂拌Е鍙戣繖浜涙鐨勭紪鐮佹牎楠岋紝娓呮帀鏃ail鐘舵€併€?      try {
+      // 修复：如果之前因为临时重复写入过 fail/重复条码，
+      // 但当前实际已经没有重复，则重新触发这些框的编码校验，清掉旧fail状态。
+      try {
         var gate = JSON.parse(localStorage.getItem('sn_code_check_gate_status') || 'null');
 
         if (gate && Array.isArray(gate.details)) {
@@ -327,8 +334,8 @@ const bomCollectUnlockMap = new WeakMap();
 
             var isOldDupFail =
               d.status === 'duplicate' ||
-              d.msg === '閲嶅鏉＄爜' ||
-              (d.status === 'fail' && d.msg === '閲嶅鏉＄爜');
+              d.msg === '重复条码' ||
+              (d.status === 'fail' && d.msg === '重复条码');
 
             if (!isOldDupFail) return;
 
@@ -338,12 +345,12 @@ const bomCollectUnlockMap = new WeakMap();
             var val = toStr(el.value);
             if (!val) return;
 
-            // 鍏堟敼鎴?pending锛岄伩鍏?gate 涓€鐩?bad
+            // 先改成 pending，避免 gate 一直 bad
             if (typeof setSnCheckState === 'function') {
-              setSnCheckState(el, 'pending', '閲嶅瑙ｉ櫎寰呭鏍?, val);
+              setSnCheckState(el, 'pending', '重复解除待复核', val);
             }
 
-            // 閲嶆柊璺戠紪鐮佹牎楠岋紝鏍￠獙閫氳繃鍚庝細鍙樺洖 ok
+            // 重新跑编码校验，校验通过后会变回 ok
             if (typeof enqueueCheck === 'function') {
               enqueueCheck(el, val);
             } else {
@@ -360,9 +367,9 @@ const bomCollectUnlockMap = new WeakMap();
 
     dupLockedEl = targetEl;
 
-    // 鍙充晶姘旀场淇濈暀
+    // 右侧气泡保留
     if (targetEl) {
-      showRowBubble(targetEl, '閲嶅鏉＄爜锛? + targetKey, 'err');
+      showRowBubble(targetEl, '重复条码：' + targetKey, 'err');
 
       try {
         if (document.activeElement === targetEl) {
@@ -374,11 +381,12 @@ const bomCollectUnlockMap = new WeakMap();
     return true;
   }
 
-  // 杈撳叆鏃跺埛鏂伴噸澶嶇姸鎬?  document.addEventListener('input', function (e) {
+  // 输入时刷新重复状态
+  document.addEventListener('input', function (e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(selector)) return;
 
-    // 鑴氭湰1鑷姩杞～鏈熼棿涓嶅仛閲嶅閿佸畾
+    // 脚本1自动转填期间不做重复锁定
     if (isDuplicateLockSuppressed() || isSnRouteMoving(t)) return;
 
     setTimeout(function () {
@@ -388,12 +396,14 @@ const bomCollectUnlockMap = new WeakMap();
     }, 0);
   }, true);
 
-  // 鎸?Enter 鏃讹紝濡傛湁閲嶅鍒欓樆姝㈢户缁彁浜?  document.addEventListener('keydown', function (e) {
+  // 按 Enter 时，如有重复则阻止继续提交
+  document.addEventListener('keydown', function (e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(selector)) return;
     if (e.key !== 'Enter') return;
 
-    // 鑷姩杞～鎻愪氦 Enter 鏃舵斁琛?    if (isDuplicateLockSuppressed() || isSnRouteMoving(t)) return;
+    // 自动转填提交 Enter 时放行
+    if (isDuplicateLockSuppressed() || isSnRouteMoving(t)) return;
 
     if (refreshDuplicateLock(t)) {
       e.preventDefault();
@@ -411,7 +421,7 @@ const bomCollectUnlockMap = new WeakMap();
     }
   }, true);
 
-    // 鎸?Enter 鏃讹紝濡係N宸茶鍏朵粬鐖堕」閲囬泦锛屼篃闃绘缁х画鎻愪氦
+    // 按 Enter 时，如SN已被其他父项采集，也阻止继续提交
 document.addEventListener('keydown', function (e) {
   var t = e.target;
 
@@ -437,19 +447,21 @@ document.addEventListener('keydown', function (e) {
   }
 }, true);
 
-  // 婊氬姩鏃堕噸鏂板畾浣嶅乏渚ф嫭鍙?  window.addEventListener('scroll', function () {
+  // 滚动时重新定位左侧括号
+  window.addEventListener('scroll', function () {
     try {
       if (dupLockedEl) refreshDuplicateLock(dupLockedEl);
     } catch (e) {}
   }, true);
 
-  // 绐楀彛鍙樺寲鏃堕噸鏂板畾浣嶅乏渚ф嫭鍙?  window.addEventListener('resize', function () {
+  // 窗口变化时重新定位左侧括号
+  window.addEventListener('resize', function () {
     try {
       if (dupLockedEl) refreshDuplicateLock(dupLockedEl);
     } catch (e) {}
   }, true);
 
-  // 椤甸潰鍔ㄦ€佸埛鏂版椂閲嶆柊鍒ゆ柇
+  // 页面动态刷新时重新判断
   setInterval(function () {
     try {
       if (!document.querySelector(selector)) return;
@@ -459,7 +471,7 @@ document.addEventListener('keydown', function (e) {
 
 
 
-  // ===== 鏃犲搴旂紪鐮佹椂鑷姩閲嶈瘯锛岄槻姝㈡壂澶揩鎺ュ彛鏁版嵁杩樻病鍑烘潵 =====
+  // ===== 无对应编码时自动重试，防止扫太快接口数据还没出来 =====
   const NO_CODE_RETRY_MAX = 6;
   const NO_CODE_RETRY_DELAYS = [300, 600, 1000, 1500, 2200, 3000];
   const noCodeRetryMap = new WeakMap();
@@ -498,7 +510,7 @@ document.addEventListener('keydown', function (e) {
     var token = st.token;
     var delay = NO_CODE_RETRY_DELAYS[Math.min(st.count - 1, NO_CODE_RETRY_DELAYS.length - 1)];
 
-    showRowBubble(el, '鏈煡鍒扮紪鐮侊紝閲嶈瘯 ' + st.count + '/' + NO_CODE_RETRY_MAX, 'warn');
+    showRowBubble(el, '未查到编码，重试 ' + st.count + '/' + NO_CODE_RETRY_MAX, 'warn');
 
     setTimeout(function () {
       if (!el || !document.body.contains(el)) return;
@@ -516,10 +528,10 @@ document.addEventListener('keydown', function (e) {
   }
 
 
-  // ===== 缁欒嚜鍔ㄨ繃绔欒剼鏈鍙栵細BOM瀛愰」SN鏍￠獙鐘舵€?=====
+  // ===== 给自动过站脚本读取：BOM子项SN校验状态 =====
   const SN_CODE_CHECK_GATE_KEY = 'sn_code_check_gate_status';
   const snCheckStateMap = new WeakMap();
-  // gate鍙戠幇鏈夊€间絾娌℃牎楠岀姸鎬佹椂锛岃嚜鍔ㄨˉ鏍￠獙锛岄伩鍏嶆案涔卲ending
+  // gate发现有值但没校验状态时，自动补校验，避免永久pending
   const gatePendingKickMap = new WeakMap();
 
   function kickPendingGateCheck(el, val, reason) {
@@ -531,7 +543,7 @@ document.addEventListener('keydown', function (e) {
     var now = Date.now();
     var old = gatePendingKickMap.get(el);
 
-    // 鍚屼竴涓€?绉掑唴鍙ˉ瑙﹀彂涓€娆★紝閬垮厤姝诲惊鐜埛鎺ュ彛
+    // 同一个值3秒内只补触发一次，避免死循环刷接口
     if (old && old.key === key && now - old.ts < 3000) return;
 
     gatePendingKickMap.set(el, {
@@ -558,7 +570,7 @@ document.addEventListener('keydown', function (e) {
     for (var i = 0; i < all.length; i++) {
       var box = all[i].closest('div[id^="Input_"]');
       var ctx = ((box && box.parentElement ? box.parentElement.innerText : '') || '').replace(/\s+/g, '');
-      if (ctx.indexOf('鏉＄爜閲囬泦') >= 0) {
+      if (ctx.indexOf('条码采集') >= 0) {
         return toStr(all[i].value);
       }
     }
@@ -569,7 +581,8 @@ document.addEventListener('keydown', function (e) {
   function publishSnCheckGate() {
     var els = [].slice.call(document.querySelectorAll(selector));
 
-    // 鍙粺璁″綋鍓嶉〉闈㈠彲瑙佺殑BOM瀛愰」SN妗?    els = els.filter(function (el) {
+    // 只统计当前页面可见的BOM子项SN框
+    els = els.filter(function (el) {
       var r = el.getBoundingClientRect();
       return document.body.contains(el) && r.width > 0 && r.height > 0;
     });
@@ -585,7 +598,8 @@ document.addEventListener('keydown', function (e) {
     var duplicateGroups = 0;
     var details = [];
 
-    // 鍏堢粺璁℃竻娲楀悗鐨凷N锛岀敤浜庡垽鏂噸澶?    // 渚嬪 U1:21340902 鍜?21340902 娓呮礂鍚庨兘绛変簬 21340902
+    // 先统计清洗后的SN，用于判断重复
+    // 例如 U1:21340902 和 21340902 清洗后都等于 21340902
     var dupCount = {};
 
     for (var d = 0; d < els.length; d++) {
@@ -617,21 +631,22 @@ document.addEventListener('keydown', function (e) {
           sn: '',
           cleanSn: '',
           status: 'empty',
-          msg: '鏈壂鎻?
+          msg: '未扫描'
         });
         continue;
       }
 
       filled++;
 
-      // 閲嶅鏉＄爜浼樺厛鍒ゅけ璐?      if (cleanVal && dupCount[cleanVal] > 1) {
+      // 重复条码优先判失败
+      if (cleanVal && dupCount[cleanVal] > 1) {
         bad++;
         details.push({
           id: el.id || '',
           sn: val,
           cleanSn: cleanVal,
           status: 'duplicate',
-          msg: '閲嶅鏉＄爜'
+          msg: '重复条码'
         });
         continue;
       }
@@ -643,14 +658,15 @@ document.addEventListener('keydown', function (e) {
            if (!st || stKey !== currKey) {
         pending++;
 
-        // 鏈夊€间絾娌℃湁瀵瑰簲鏍￠獙鐘舵€侊紝鑷姩琛ヤ竴娆℃牎楠?        kickPendingGateCheck(el, val, !st ? '鏃犳牎楠岀姸鎬? : '鏍￠獙鍊间笉涓€鑷?);
+        // 有值但没有对应校验状态，自动补一次校验
+        kickPendingGateCheck(el, val, !st ? '无校验状态' : '校验值不一致');
 
         details.push({
           id: el.id || '',
           sn: val,
           cleanSn: cleanVal,
           status: 'pending',
-          msg: !st ? '绛夊緟鏍￠獙-宸茶ˉ瑙﹀彂' : '绛夊緟鏍￠獙-鍊煎彉鏇?
+          msg: !st ? '等待校验-已补触发' : '等待校验-值变更'
         });
         continue;
       }
@@ -685,7 +701,7 @@ document.addEventListener('keydown', function (e) {
      duplicateGroups: duplicateGroups,
 
 
-      // 蹇呴』锛氭湁瀛愰」妗嗐€佸叏閮ㄥ～鍐欍€佸叏閮ㄦ牎楠孫K銆佹棤閲嶅
+      // 必须：有子项框、全部填写、全部校验OK、无重复
       allOk: total > 0 &&
              filled === total &&
              ok === total &&
@@ -705,7 +721,7 @@ document.addEventListener('keydown', function (e) {
 try {
   bomCollectSaveWhenGateAllOk(data);
 } catch (e) {
-  console.warn('[BOM閲囬泦璁板綍] 淇濆瓨澶辫触锛?, e);
+  console.warn('[BOM采集记录] 保存失败：', e);
 }
 
 
@@ -729,15 +745,17 @@ try {
     publishSnCheckGate();
   }
 
-  // 瀹氭椂鍒锋柊鐘舵€侊紝闃叉绯荤粺甯﹀嚭/鍒犻櫎SN妗嗗悗鐘舵€佷笉鍚屾
+  // 定时刷新状态，防止系统带出/删除SN框后状态不同步
   setInterval(function () {
     try { publishSnCheckGate(); } catch (e) {}
   }, 1000);
 
 
-    // 淇1锛氳剼鏈富鍔ㄦ竻绌烘椂锛岀姝㈢┖鍊煎洖鏀?  const suppressEmptyReplay = new WeakSet();
+    // 修复1：脚本主动清空时，禁止空值回放
+  const suppressEmptyReplay = new WeakSet();
 
-  // 淇2锛氫覆琛岄槦鍒楋紝闃插苟鍙戝綊浣嶆墦鏋?  let __scanChain = Promise.resolve();
+  // 修复2：串行队列，防并发归位打架
+  let __scanChain = Promise.resolve();
   function enqueueCheck(el, sn){
     __scanChain = __scanChain
       .then(async function () {
@@ -772,16 +790,16 @@ function syncSwitchFromStorage() {
 
 
   function normalizeForCompare(v){
-    return toStr(v).replace(/\u00A0/g, ' ').replace(/\s+/g, '').replace(/锛?g, ':').toUpperCase();
+    return toStr(v).replace(/\u00A0/g, ' ').replace(/\s+/g, '').replace(/：/g, ':').toUpperCase();
   }
 
   function normalizeSnForDup(v){
     v = toStr(v).replace(/\u00A0/g, ' ').replace(/\s+/g, '').trim();
-    if (v.indexOf('锛?) >= 0) v = v.split('锛?).pop();
+    if (v.indexOf('：') >= 0) v = v.split('：').pop();
     if (v.indexOf(':') >= 0) v = v.split(':').pop();
     return v.toUpperCase();
   }
-// ===== 宸︿晶鏉＄爜鑷畾涔夋竻娲楄鍒?=====
+// ===== 左侧条码自定义清洗规则 =====
 function loadLeftCleanRules() {
   try {
     var arr = JSON.parse(localStorage.getItem(LEFT_CLEAN_KEY) || '[]');
@@ -793,8 +811,8 @@ function loadLeftCleanRules() {
         x = toStr(x)
           .replace(/\u00A0/g, ' ')
           .replace(/\s+/g, '')
-          .replace(/锛?g, ':')
-          .replace(/锛?g, '-');
+          .replace(/：/g, ':')
+          .replace(/－/g, '-');
 
         if (x && out.indexOf(x) < 0) {
           out.push(x);
@@ -812,8 +830,8 @@ function cleanLeftByRules(seg) {
   var s = toStr(seg)
     .replace(/\u00A0/g, ' ')
     .replace(/\s+/g, '')
-    .replace(/锛?g, ':')
-    .replace(/锛?g, '-');
+    .replace(/：/g, ':')
+    .replace(/－/g, '-');
 
   if (!s) return '';
 
@@ -823,7 +841,7 @@ function cleanLeftByRules(seg) {
     var r = rules[i];
     if (!r) continue;
 
-    // 閰嶇疆 ":"锛氭竻娲楀啋鍙峰墠闈㈢殑浠绘剰瀛楃
+    // 配置 ":"：清洗冒号前面的任意字符
     // U1:213409015510S4104636 => 213409015510S4104636
     if (r === ':') {
       var p = s.indexOf(':');
@@ -833,7 +851,7 @@ function cleanLeftByRules(seg) {
       continue;
     }
 
-    // 閰嶇疆 "-"锛氭竻娲楁í鏉犲墠闈㈢殑浠绘剰瀛楃
+    // 配置 "-"：清洗横杠前面的任意字符
     // ABC-34090213 => 34090213
     if (r === '-') {
       var p2 = s.indexOf('-');
@@ -843,7 +861,8 @@ function cleanLeftByRules(seg) {
       continue;
     }
 
-    // 鏅€氬浐瀹氬墠缂€锛?    // 閰嶇疆 SN锛歋N03035FDT => 03035FDT
+    // 普通固定前缀：
+    // 配置 SN：SN03035FDT => 03035FDT
     if (s.toUpperCase().indexOf(r.toUpperCase()) === 0) {
       s = s.slice(r.length);
     }
@@ -852,9 +871,9 @@ function cleanLeftByRules(seg) {
   return s;
 }
 
-// 鍙敤浜庡乏渚ф潯鐮佺殑娓呮礂锛屼笉褰卞搷鎺ュ彛鏌ュ嚭鏉ョ殑缂栫爜
+// 只用于左侧条码的清洗，不影响接口查出来的编码
 function extractLeftCodeSmart(text) {
-  text = toStr(text).replace(/\u00A0/g, ' ').replace(/锛?g, ':');
+  text = toStr(text).replace(/\u00A0/g, ' ').replace(/：/g, ':');
 
   var parts = text.split(/\s+/).filter(Boolean);
   var last = '';
@@ -862,15 +881,15 @@ function extractLeftCodeSmart(text) {
   for (var i = 0; i < parts.length; i++) {
     var seg = parts[i];
 
-    // 鍏堟墽琛岃嚜瀹氫箟宸︿晶娓呮礂
+    // 先执行自定义左侧清洗
     seg = cleanLeftByRules(seg);
 
-    // 淇濈暀鍘熸潵閫昏緫锛氬啋鍙峰悗鍐呭浼樺厛
+    // 保留原来逻辑：冒号后内容优先
     if (seg.indexOf(':') >= 0) {
       seg = seg.split(':').pop();
     }
 
-    // 淇濈暀鍘熸潵閫昏緫锛氬甫瀛楁瘝鍓嶇紑鐨?xxx- / xxx_ 鍘绘帀
+    // 保留原来逻辑：带字母前缀的 xxx- / xxx_ 去掉
     seg = seg.replace(/^(?=[A-Z0-9]*[A-Z])[A-Z0-9]+[-_]/i, '');
 
     seg = normalizeForCompare(seg);
@@ -880,7 +899,7 @@ function extractLeftCodeSmart(text) {
 
   return last || normalizeForCompare(cleanLeftByRules(text));
 }
-// ===== 鐖堕」鏉＄爜-BOM-SN閲囬泦璁板綍 START =====
+// ===== 父项条码-BOM-SN采集记录 START =====
 function bomCollectParentKey(v) {
   return normalizeSnForDup(v);
 }
@@ -1028,7 +1047,7 @@ function bomCollectSaveWhenGateAllOk(gateData) {
 
   bomCollectSaveStore(store);
 
-  console.log('[BOM閲囬泦璁板綍] 宸蹭繚瀛樼埗椤笲OM-SN鍏崇郴锛?, {
+  console.log('[BOM采集记录] 已保存父项BOM-SN关系：', {
     parentSn: parentRaw || parentKey,
     count: items.length,
     items: items
@@ -1096,7 +1115,7 @@ function bomCollectUnlockInput(el) {
     ts: Date.now()
   });
 
-  console.log('[BOM閲囬泦璁板綍] 宸叉墜鍔ㄨВ閿侊細', key);
+  console.log('[BOM采集记录] 已手动解锁：', key);
 }
 
 function bomCollectCheckConflictAndLock(el, snRaw) {
@@ -1117,8 +1136,8 @@ function bomCollectCheckConflictAndLock(el, snRaw) {
   var cleanSn = bomCollectSnKey(snRaw);
 
   var msg =
-    'SN銆? + cleanSn + '銆戝凡琚埗椤广€? + (hit.parentSn || hit.parentKey || '') + '銆戦噰闆? +
-    (hit.bomCode ? '锛孊OM銆? + hit.bomCode + '銆? : '');
+    'SN【' + cleanSn + '】已被父项【' + (hit.parentSn || hit.parentKey || '') + '】采集' +
+    (hit.bomCode ? '，BOM【' + hit.bomCode + '】' : '');
 
   try {
     setSnCheckState(el, 'fail', msg, snRaw);
@@ -1140,7 +1159,7 @@ function bomCollectCheckConflictAndLock(el, snRaw) {
     } catch (e4) {}
   }, 0);
 
-  console.warn('[BOM閲囬泦璁板綍] 鍙戠幇璺ㄧ埗椤归噸澶嶉噰闆嗭細', {
+  console.warn('[BOM采集记录] 发现跨父项重复采集：', {
     sn: cleanSn,
     currentParent: getParentBarcodeValueForGate(),
     oldParent: hit.parentSn || hit.parentKey,
@@ -1149,11 +1168,11 @@ function bomCollectCheckConflictAndLock(el, snRaw) {
 
   return true;
 }
-// ===== 鐖堕」鏉＄爜-BOM-SN閲囬泦璁板綍 END =====
+// ===== 父项条码-BOM-SN采集记录 END =====
 
-  // 浠呭垹鍚瓧姣嶅墠缂€
+  // 仅删含字母前缀
   function extractCodeSmart(text){
-    text = toStr(text).replace(/\u00A0/g, ' ').replace(/锛?g, ':');
+    text = toStr(text).replace(/\u00A0/g, ' ').replace(/：/g, ':');
     var parts = text.split(/\s+/).filter(Boolean);
     var last = '';
 
@@ -1174,7 +1193,7 @@ function bomCollectCheckConflictAndLock(el, snRaw) {
 }
 
 
-  // ===== 宸︿晶瀹氫綅 =====
+  // ===== 左侧定位 =====
   function nearestLeftCodeCell(inputEl){
     var ir = inputEl.getBoundingClientRect();
     var cands = [].slice.call(document.querySelectorAll('td.grid-cell'));
@@ -1197,18 +1216,19 @@ function bomCollectCheckConflictAndLock(el, snRaw) {
   }
 
   function findCodeNodeByInput(el){ return nearestLeftCodeCell(el); }
-  function findCodeByInput(el){ return findCodeNodeByInput(el); } // 鍏滃簳鍒悕
+  function findCodeByInput(el){ return findCodeNodeByInput(el); } // 兜底别名
   function getNearCode(el){
     var td = findCodeNodeByInput(el);
     return td ? toStr(td.innerText) : '';
   }
 
- // ===== 鏌ヨ =====
+ // ===== 查询 =====
 function isStrongCode(v){ return /^(34|45)\d{6}(-\d{3})?$/.test(toStr(v)); }
 function isWeakCode(v){ return /^\d{8}(-\d{3})?$/.test(toStr(v)); }
 function looksLikeDate8(v){ return /^20\d{6}$/.test(toStr(v)); }
 
-// 鏂板锛?寮€澶达紝8浣嶏紝鎴栧甫-3浣嶅亸鐮?function isNineCode(v){
+// 新增：9开头，8位，或带-3位偏码
+function isNineCode(v){
   v = toStr(v).toUpperCase();
   return /^9[A-Z0-9]{7}(?:-\d{3})?$/.test(v);
 }
@@ -1302,7 +1322,7 @@ function pickFirstMatchedCode(obj){
     return queryCodeBySn_OpenApi(snRaw);
   }
 
-  // ===== 鑷姩褰掍綅 =====
+  // ===== 自动归位 =====
   function allSnInputs(){
     var arr = [].slice.call(document.querySelectorAll(selector));
     arr.sort(function (a, b) {
@@ -1361,7 +1381,7 @@ function pickFirstMatchedCode(obj){
 
     if (hasDuplicateSn(snRaw, currEl)) return null;
 
-        // 鑷姩杞～鏈熼棿锛屾殏鍋滈噸澶嶉攣瀹氾紝閬垮厤涓存椂閲嶅璇攣
+        // 自动转填期间，暂停重复锁定，避免临时重复误锁
     suppressDuplicateLockForRoute(1200);
 
     target.dataset.snAutoFill = '1';
@@ -1372,7 +1392,7 @@ function pickFirstMatchedCode(obj){
 
     target.value = snRaw;
 
-    setSnCheckState(target, 'pending', '鑷姩杞～寰呮牎楠?, snRaw);
+    setSnCheckState(target, 'pending', '自动转填待校验', snRaw);
 
 
     setTimeout(function () {
@@ -1383,9 +1403,10 @@ function pickFirstMatchedCode(obj){
 
     }, 0);
 
-    // 淇1锛氭竻绌哄師妗嗘椂鍚屾妯″瀷 + 娓呯紦瀛?+ 绂佹绌哄€煎洖鏀?    currEl.value = '';
+    // 修复1：清空原框时同步模型 + 清缓存 + 禁止空值回放
+    currEl.value = '';
     lastScanByInput.delete(currEl);
-    setSnCheckState(currEl, 'empty', '宸茶浆濉?, '');
+    setSnCheckState(currEl, 'empty', '已转填', '');
     suppressEmptyReplay.add(currEl);
 
 
@@ -1393,7 +1414,8 @@ function pickFirstMatchedCode(obj){
     currEl.dispatchEvent(new Event('change', { bubbles: true }));
 
     setTimeout(function () { suppressEmptyReplay.delete(currEl); }, 300);
-    // 鑷姩杞～缁撴潫鍚庯紝娓呴櫎鏍囪锛屽苟閲嶆柊妫€鏌ョ湡瀹為噸澶?    setTimeout(function () {
+    // 自动转填结束后，清除标记，并重新检查真实重复
+    setTimeout(function () {
       try { delete target.dataset.snAutoFill; } catch(e){}
       try { delete target.dataset.snRouteMoving; } catch(e){}
       try { delete currEl.dataset.snRouteMoving; } catch(e){}
@@ -1401,7 +1423,8 @@ function pickFirstMatchedCode(obj){
       try { refreshDuplicateLock(target); } catch(e2){}
     }, 1200);
 
-    // 淇濇寔浣犲師琛屼负锛氬洖褰撳墠妗嗗苟鍏ㄩ€?    setTimeout(function () { try { currEl.focus(); currEl.select(); } catch(e){} }, 80);
+    // 保持你原行为：回当前框并全选
+    setTimeout(function () { try { currEl.focus(); currEl.select(); } catch(e){} }, 80);
 
     return target;
   }
@@ -1416,7 +1439,7 @@ function pickFirstMatchedCode(obj){
     return null;
   }
 
-  // ===== 姘旀场 =====
+  // ===== 气泡 =====
   function ensureRowBubble(inputEl){
     var st = rowBubbleMap.get(inputEl);
 
@@ -1432,7 +1455,7 @@ function pickFirstMatchedCode(obj){
       rowBubbleKeys.add(inputEl);
     }
 
-    // 姣忔閮藉己鍒跺埛鏂版牱寮忥紝閬垮厤鏃ф牱寮忔畫鐣欏鑷村彧鏈変竴涓皬璞嗚眴
+    // 每次都强制刷新样式，避免旧样式残留导致只有一个小豆豆
     st.box.style.position = 'fixed';
     st.box.style.zIndex = '2147483647';
     st.box.style.display = 'block';
@@ -1475,7 +1498,8 @@ function pickFirstMatchedCode(obj){
 
     var r = inputEl.getBoundingClientRect();
 
-    // 纭繚鏂囧瓧宸茬粡鎾戝紑鍚庡啀鍙栧楂?    var bw = st.box.getBoundingClientRect().width || st.box.offsetWidth || 120;
+    // 确保文字已经撑开后再取宽高
+    var bw = st.box.getBoundingClientRect().width || st.box.offsetWidth || 120;
     var bh = st.box.getBoundingClientRect().height || st.box.offsetHeight || 28;
     st.box.style.maxWidth = Math.min(520, window.innerWidth - 40) + 'px';
     st.box.style.width = 'auto';
@@ -1483,9 +1507,10 @@ function pickFirstMatchedCode(obj){
     var arrow = 6;
     var gap = 8;
 
-    // 榛樿鏀惧彸杈?    var left = r.right + gap + arrow;
+    // 默认放右边
+    var left = r.right + gap + arrow;
 
-    // 濡傛灉鍙宠竟绌洪棿涓嶅锛岃创鍒拌绐楀彸杈癸紝浣嗕粛鐒朵繚鎸佸湪鍙充晶鍖哄煙
+    // 如果右边空间不够，贴到视窗右边，但仍然保持在右侧区域
     if (left + bw > window.innerWidth - 8) {
       left = Math.max(8, window.innerWidth - bw - 8);
     }
@@ -1500,7 +1525,8 @@ function pickFirstMatchedCode(obj){
     st.box.style.left = left + 'px';
     st.box.style.top = top + 'px';
 
-    // 绠ご鍦ㄦ皵娉″乏渚э紝鎸囧悜SN妗?    st.arrow.style.left = (left - arrow * 2 + 1) + 'px';
+    // 箭头在气泡左侧，指向SN框
+    st.arrow.style.left = (left - arrow * 2 + 1) + 'px';
     st.arrow.style.top = (top + bh / 2 - arrow) + 'px';
   }
 
@@ -1520,21 +1546,23 @@ function pickFirstMatchedCode(obj){
 
     st.box.style.background = bg;
     st.box.style.color = '#fff';
-    st.box.textContent = st.text || '鎻愮ず';
+    st.box.textContent = st.text || '提示';
 
-    // 鍏堟竻绌虹澶存棫鏍峰紡锛岄槻姝㈠乏绠ご/鍙崇澶存牱寮忓彔鍔犳垚灏忚眴璞?    st.arrow.style.borderTop = '0';
+    // 先清空箭头旧样式，防止左箭头/右箭头样式叠加成小豆豆
+    st.arrow.style.borderTop = '0';
     st.arrow.style.borderBottom = '0';
     st.arrow.style.borderLeft = '0';
     st.arrow.style.borderRight = '0';
 
-    // 姘旀场鍦ㄥ彸杈癸紝鎵€浠ョ澶村湪姘旀场宸︿晶锛屽皷澶存湞宸︼紝鎸囧悜SN妗?    st.arrow.style.borderTop = '6px solid transparent';
+    // 气泡在右边，所以箭头在气泡左侧，尖头朝左，指向SN框
+    st.arrow.style.borderTop = '6px solid transparent';
     st.arrow.style.borderBottom = '6px solid transparent';
     st.arrow.style.borderRight = '6px solid ' + bg;
     st.arrow.style.borderLeft = '0';
 
     positionRowBubble(inputEl);
 
-    // 鍐嶅欢杩熶竴甯ч噸鏂板畾浣嶏紝纭繚鏂囧瓧瀹藉害鐢熸晥
+    // 再延迟一帧重新定位，确保文字宽度生效
     requestAnimationFrame(function () {
       positionRowBubble(inputEl);
     });
@@ -1557,7 +1585,7 @@ function pickFirstMatchedCode(obj){
   window.addEventListener('scroll', refreshAllBubblePos, true);
   window.addEventListener('resize', refreshAllBubblePos, true);
 
-  // ===== 鐧藉簳鎮诞淇℃伅鍗★紙鏀惧湪SN妗嗕笅鏂癸級=====
+  // ===== 白底悬浮信息卡（放在SN框下方）=====
   function ensureHoverCard(inputEl){
     var card = hoverCardMap.get(inputEl);
     if (card) return card;
@@ -1589,7 +1617,7 @@ function pickFirstMatchedCode(obj){
 
     var r = inputEl.getBoundingClientRect();
     var left = r.left;
-    var top = r.bottom + 6; // 鏀惧湪涓嬫柟
+    var top = r.bottom + 6; // 放在下方
 
     var maxW = 380;
     if (left + maxW > window.innerWidth - 8) {
@@ -1598,7 +1626,7 @@ function pickFirstMatchedCode(obj){
 
     var cardH = card.offsetHeight || 120;
     if (top + cardH > window.innerHeight - 8) {
-      top = Math.max(8, r.top - cardH - 6); // 鏀句笉涓嬪氨涓婃柟
+      top = Math.max(8, r.top - cardH - 6); // 放不下就上方
     }
 
     card.style.left = left + 'px';
@@ -1638,10 +1666,10 @@ function pickFirstMatchedCode(obj){
     hoverCurrentEl = inputEl;
 
     var leftRaw = getNearCode(inputEl) || '';
-    var leftFiltered = extractLeftCodeSmart(leftRaw) || '(鏃?';
+    var leftFiltered = extractLeftCodeSmart(leftRaw) || '(无)';
     var card = ensureHoverCard(inputEl);
 
-    card.textContent = '宸︿晶(杩囨护鍚?: ' + leftFiltered + '\n鏌ヨ涓?..';
+    card.textContent = '左侧(过滤后): ' + leftFiltered + '\n查询中...';
     card.style.display = 'block';
     positionHoverCard(inputEl);
 
@@ -1649,19 +1677,19 @@ function pickFirstMatchedCode(obj){
       var info = await queryHoverInfo(snRaw);
       if (hoverCurrentEl !== inputEl) return;
 
-      var queryFiltered = info && info.code ? (extractCodeSmart(info.code) || info.code) : '(鏃?';
+      var queryFiltered = info && info.code ? (extractCodeSmart(info.code) || info.code) : '(无)';
       card.textContent =
-        '宸︿晶(杩囨护鍚?: ' + leftFiltered + '\n' +
-        '鏌ヨ: ' + queryFiltered + '\n' +
-        '鏉ユ簮: ' + (info ? info.source : '-') + '\n' +
-        '妯″紡: ' + (info ? info.mode : '-') + '\n' +
+        '左侧(过滤后): ' + leftFiltered + '\n' +
+        '查询: ' + queryFiltered + '\n' +
+        '来源: ' + (info ? info.source : '-') + '\n' +
+        '模式: ' + (info ? info.mode : '-') + '\n' +
         'rows: ' + (info ? info.rows : 0);
 
       card.style.display = 'block';
       positionHoverCard(inputEl);
     } catch (e) {
       if (hoverCurrentEl !== inputEl) return;
-      card.textContent = '宸︿晶(杩囨护鍚?: ' + leftFiltered + '\n鏌ヨ寮傚父: ' + String(e);
+      card.textContent = '左侧(过滤后): ' + leftFiltered + '\n查询异常: ' + String(e);
       card.style.display = 'block';
       positionHoverCard(inputEl);
     }
@@ -1676,7 +1704,7 @@ function pickFirstMatchedCode(obj){
     if (t && t.matches && t.matches(selector)) hideHoverCard(t);
   }, true);
 
-  // ===== 涓绘牎楠?=====
+  // ===== 主校验 =====
   function paintCodeNode(node, status){
     if (!node) return;
     node.style.backgroundColor = '';
@@ -1696,7 +1724,7 @@ function pickFirstMatchedCode(obj){
     var snRaw = toStr(snOverride || el.value);
       if (!snRaw) {
       resetNoCodeRetry(el);
-      setSnCheckState(el, 'empty', '绌?, '');
+      setSnCheckState(el, 'empty', '空', '');
       if (isStale()) return;
       removeRowBubble(el);
       paintCodeNode(findCodeNodeByInput(el), '');
@@ -1707,7 +1735,7 @@ function pickFirstMatchedCode(obj){
       return;
     }
 
-    setSnCheckState(el, 'pending', '鏌ヨ涓?, snRaw);
+    setSnCheckState(el, 'pending', '查询中', snRaw);
 
 
     var expected = getNearCode(el);
@@ -1721,24 +1749,25 @@ function pickFirstMatchedCode(obj){
 
       if (!expected) {
         resetNoCodeRetry(el);
-        setSnCheckState(el, 'fail', '鏃犲乏渚х紪鐮?, snRaw);
+        setSnCheckState(el, 'fail', '无左侧编码', snRaw);
         paintCodeNode(codeNode, 'none');
-        showRowBubble(el, '鏃犲乏渚х紪鐮?, 'warn');
+        showRowBubble(el, '无左侧编码', 'warn');
 
       } else if (!actual) {
         paintCodeNode(codeNode, 'none');
 
-        // 鏌ヤ笉鍒扮紪鐮佹椂鍏堣嚜鍔ㄩ噸璇曪紝闃叉鎵お蹇帴鍙ｈ繕娌¤繑鍥炴暟鎹?        if (scheduleNoCodeRetry(el, snRaw)) {
-          setSnCheckState(el, 'retry', '鏈煡鍒扮紪鐮侊紝閲嶈瘯涓?, snRaw);
+        // 查不到编码时先自动重试，防止扫太快接口还没返回数据
+        if (scheduleNoCodeRetry(el, snRaw)) {
+          setSnCheckState(el, 'retry', '未查到编码，重试中', snRaw);
           return;
         }
 
-        setSnCheckState(el, 'fail', '鏃犲搴旂紪鐮侊紝宸查噸璇? + NO_CODE_RETRY_MAX + '娆?, snRaw);
-        showRowBubble(el, '鏃犲搴旂紪鐮侊紝宸查噸璇? + NO_CODE_RETRY_MAX + '娆?, 'warn');
+        setSnCheckState(el, 'fail', '无对应编码，已重试' + NO_CODE_RETRY_MAX + '次', snRaw);
+        showRowBubble(el, '无对应编码，已重试' + NO_CODE_RETRY_MAX + '次', 'warn');
 
       } else if (isCodeEqual(expected, actual)) {
         resetNoCodeRetry(el);
-        setSnCheckState(el, 'ok', '缂栫爜涓€鑷?, snRaw);
+        setSnCheckState(el, 'ok', '编码一致', snRaw);
         paintCodeNode(codeNode, 'ok');
         removeRowBubble(el);
 
@@ -1749,14 +1778,14 @@ function pickFirstMatchedCode(obj){
         if (isStale()) return;
 
         if (targetEl) {
-          setSnCheckState(el, 'empty', '宸茶浆濉?, '');
+          setSnCheckState(el, 'empty', '已转填', '');
           paintCodeNode(codeNode, 'none');
-          showRowBubble(el, '宸茶浆濉?, 'warn');
-          showRowBubble(targetEl, '宸茶嚜鍔ㄥ～鍏ュ搴旂紪鐮佽', 'warn');
+          showRowBubble(el, '已转填', 'warn');
+          showRowBubble(targetEl, '已自动填入对应编码行', 'warn');
         } else {
-          setSnCheckState(el, 'fail', '缂栫爜涓嶄竴鑷?, snRaw);
+          setSnCheckState(el, 'fail', '编码不一致', snRaw);
           paintCodeNode(codeNode, 'fail');
-          showRowBubble(el, '缂栫爜涓嶄竴鑷?, 'err');
+          showRowBubble(el, '编码不一致', 'err');
 
           if (lockOn) {
             lockedInput = el;
@@ -1768,9 +1797,9 @@ function pickFirstMatchedCode(obj){
     } catch (e) {
       if (isStale()) return;
       resetNoCodeRetry(el);
-      setSnCheckState(el, 'fail', '鏌ヨ澶辫触', snRaw);
+      setSnCheckState(el, 'fail', '查询失败', snRaw);
       paintCodeNode(codeNode, 'fail');
-      showRowBubble(el, '鏌ヨ澶辫触', 'err');
+      showRowBubble(el, '查询失败', 'err');
     }
 
     if (isStale()) return;
@@ -1778,21 +1807,22 @@ function pickFirstMatchedCode(obj){
   }
 
 
-  // ===== 鐩戝惉 =====
-  // 鍙紶鏍囨偓鍋滄樉绀鸿鎯咃紝涓嶅湪 focus 鏃舵樉绀?  document.addEventListener('mouseover', function (e) {
+  // ===== 监听 =====
+  // 只鼠标悬停显示详情，不在 focus 时显示
+  document.addEventListener('mouseover', function (e) {
     var t = e.target;
     if (t && t.matches && t.matches(selector)) showHoverInfo(t);
   }, true);
 
 
- // focusin 浠呬繚鐣欓攣閫昏緫锛堝幓鎺?autoFilled 鑷姩璺充笅涓€涓級
+ // focusin 仅保留锁逻辑（去掉 autoFilled 自动跳下一个）
 document.addEventListener('focusin', function (e) {
   var t = e.target;
   if (!t || !t.matches || !t.matches(selector)) return;
 
   __lastSnInput = t;
 
-  // 閿佸畾浼樺厛
+  // 锁定优先
   if (lockOn && lockedInput && t !== lockedInput) {
     setTimeout(function () {
       try { lockedInput.focus(); lockedInput.select(); } catch (err) {}
@@ -1800,7 +1830,8 @@ document.addEventListener('focusin', function (e) {
     return;
   }
 
-  // 宸茶嚜鍔ㄨ浆濉笖鏈夊€硷細鑷姩璺宠繃鍒颁笅涓€涓┖妗?  if (t.dataset && t.dataset.autoFilled === '1' && toStr(t.value)) {
+  // 已自动转填且有值：自动跳过到下一个空框
+  if (t.dataset && t.dataset.autoFilled === '1' && toStr(t.value)) {
     var nxt = focusNextEmptyFrom(t);
     if (nxt) {
       setTimeout(function () {
@@ -1815,10 +1846,11 @@ document.addEventListener('focusin', function (e) {
   document.addEventListener('focusout', function (e) {
     var t = e.target;
     if (t && t.matches && t.matches(selector)) {
-      __preJumpSnInput = t; // 璁板綍璺宠蛋鍓峉N妗?    }
+      __preJumpSnInput = t; // 记录跳走前SN框
+    }
   }, true);
 
-  // 淇2锛歩nput 鏀逛负涓茶鍏ラ槦
+  // 修复2：input 改为串行入队
   document.addEventListener('input', function (e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(selector)) return;
@@ -1829,9 +1861,9 @@ document.addEventListener('focusin', function (e) {
        if (toStr(t.value)) {
       lastScanByInput.set(t, toStr(t.value));
       lastNonEmptyScanByInput.set(t, toStr(t.value));
-      setSnCheckState(t, 'pending', '绛夊緟鏍￠獙', toStr(t.value));
+      setSnCheckState(t, 'pending', '等待校验', toStr(t.value));
     } else {
-      setSnCheckState(t, 'empty', '绌?, '');
+      setSnCheckState(t, 'empty', '空', '');
     }
 
 
@@ -1847,7 +1879,7 @@ document.addEventListener('focusin', function (e) {
     }, 220);
   }, true);
 
-  // 淇1+2锛氬睆钄借剼鏈竻绌哄洖鏀?+ 涓茶鍏ラ槦
+  // 修复1+2：屏蔽脚本清空回放 + 串行入队
   document.addEventListener('change', function (e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(selector)) return;
@@ -1866,7 +1898,7 @@ document.addEventListener('focusin', function (e) {
     }
   }, true);
 
-  // 鍙屽嚮瑙ｉ攣
+  // 双击解锁
   document.addEventListener('dblclick', function (e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(selector)) return;
@@ -1880,12 +1912,12 @@ document.addEventListener('focusin', function (e) {
     lockedInput = null;
     lockedValue = '';
 
-    showRowBubble(t, '宸茶В閿侊紝鍙墜鍔ㄤ慨鏀?, 'warn');
+    showRowBubble(t, '已解锁，可手动修改', 'warn');
     setTimeout(function(){ removeRowBubble(t); }, 1200);
   }, true);
 
 
-  // Esc 瑙ｉ攣
+  // Esc 解锁
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       lockedInput = null;
@@ -1893,13 +1925,13 @@ document.addEventListener('focusin', function (e) {
     }
   }, true);
 
-  // ===== 瑕嗙洊杩欐暣娈碉細寮圭獥鑷姩鍏抽棴 + 鍗曟鍥炴媺 + 涓嶅洖濉絾鍙浆濉?=====
+  // ===== 覆盖这整段：弹窗自动关闭 + 单次回拉 + 不回填但可转填 =====
   var __lastSnInput = null;
   var __preJumpSnInput = null;
   var __snErrBubbleUntil = 0;
   var __snErrBubbleText = '';
 
-  // 璁板綍褰撳墠SN鐒︾偣
+  // 记录当前SN焦点
   document.addEventListener('focusin', function (e) {
     var t = e.target;
     if (t && t.matches && t.matches(selector)) {
@@ -1907,7 +1939,8 @@ document.addEventListener('focusin', function (e) {
     }
   }, true);
 
-  // 璁板綍璺宠蛋鍓峉N妗?  document.addEventListener('focusout', function (e) {
+  // 记录跳走前SN框
+  document.addEventListener('focusout', function (e) {
     var t = e.target;
     if (t && t.matches && t.matches(selector)) {
       __preJumpSnInput = t;
@@ -1928,21 +1961,24 @@ document.addEventListener('focusin', function (e) {
         if (!dialog) return;
 
         var txt = (dialog.innerText || '');
-                var isErr1 = txt.indexOf('鏈厤缃柊缂栫爜') >= 0 && txt.indexOf('鐗╂枡SN[') >= 0;
-        var isErr2 = txt.indexOf('鏂扮紪鐮佷笌褰撳墠鐗╂枡缂栫爜涓嶄竴鑷?) >= 0;
+                var isErr1 = txt.indexOf('未配置新编码') >= 0 && txt.indexOf('物料SN[') >= 0;
+        var isErr2 = txt.indexOf('新编码与当前物料编码不一致') >= 0;
         if (!isErr1 && !isErr2) return;
 
-        // 鑷姩鐐光€滅‘瀹氣€?        var okBtn = dialog.querySelector('button.hae-btn.btn-primary, .btn-primary');
+        // 自动点“确定”
+        var okBtn = dialog.querySelector('button.hae-btn.btn-primary, .btn-primary');
         if (okBtn) {
           try { okBtn.click(); } catch (e) {}
         }
 
-        // 鍗曟鍥炴媺锛堜笉鍥炲～锛夛紝浣嗙敤缂撳瓨鍊艰Е鍙戣浆濉?        setTimeout(function () {
+        // 单次回拉（不回填），但用缓存值触发转填
+        setTimeout(function () {
           var recoverEl = __preJumpSnInput || __lastSnInput;
           if (!recoverEl || !document.body.contains(recoverEl)) return;
           if (!(recoverEl.matches && recoverEl.matches(selector))) return;
 
-         // 涓嶅洖濉緭鍏ユ锛屼絾鐢ㄦ渶杩戠紦瀛樺€艰窇鏍￠獙/鑷姩杞～锛堝惈鍏滃簳缂撳瓨锛?var last = toStr(
+         // 不回填输入框，但用最近缓存值跑校验/自动转填（含兜底缓存）
+var last = toStr(
   lastScanByInput.get(recoverEl) ||
   lastNonEmptyScanByInput.get(recoverEl)
 );
@@ -1951,7 +1987,7 @@ if (last) {
 }
 
 
-          var msg = isErr2 ? '绯荤粺鏍￠獙鏈€氳繃锛氭柊缂栫爜涓庡綋鍓嶇墿鏂欑紪鐮佷笉涓€鑷达紝璇烽噸鏂版壂鎻? : '绯荤粺鏍￠獙鏈€氳繃锛氭湭閰嶇疆鏂扮紪鐮侊紝璇烽噸鏂版壂鎻?;
+          var msg = isErr2 ? '系统校验未通过：新编码与当前物料编码不一致，请重新扫描' : '系统校验未通过：未配置新编码，请重新扫描';
 
           __snErrBubbleText = msg;
           __snErrBubbleUntil = Date.now() + 5000;
@@ -1974,7 +2010,7 @@ if (last) {
     subtree: true
   });
 
-  // ===== 鎮诞鍗″厹搴曢殣钘忥紙闃插崱浣忥級=====
+  // ===== 悬浮卡兜底隐藏（防卡住）=====
   setInterval(function () {
     if (!hoverCurrentEl) return;
 
@@ -2005,7 +2041,7 @@ if (last) {
     }
   }, true);
 
- // ===== 娓呯悊 =====
+ // ===== 清理 =====
 function hasGridRows(){ return document.querySelectorAll('tr.grid-row').length > 0; }
 function allSnEmpty(){
   var els = document.querySelectorAll(selector);
@@ -2024,21 +2060,21 @@ setInterval(function () {
   }
 }, 300);
 
-// ===== SN鎵归噺杞～鎵弿妗嗭紙鍙傝€冪簿绠€鍏滃簳鐗堬級=====
+// ===== SN批量转填扫描框（参考精简兜底版）=====
 
-var __bomListActive = false;        // BOM鍒楄〃鏄惁娲昏穬
-var __snProcessed = new Set();      // 宸插鐞嗙殑SN锛堝幓閲嶏級
-var __snQueue = [];                 // 澶勭悊闃熷垪
-var __snLogs = [];                  // 鏃ュ織璁板綍
+var __bomListActive = false;        // BOM列表是否活跃
+var __snProcessed = new Set();      // 已处理的SN（去重）
+var __snQueue = [];                 // 处理队列
+var __snLogs = [];                  // 日志记录
 var __panelPosKey = '__sn_panel_pos_v3';
 
-// ===== 宸ュ叿鍑芥暟 =====
+// ===== 工具函数 =====
 function __getBarcodeInput() {
   var all = document.querySelectorAll('div[id^="Input_"] > input.hae-ui-input[type="text"], div[id^="Input_"] > input');
   for (var i = 0; i < all.length; i++) {
     var box = all[i].closest('div[id^="Input_"]');
     var ctx = ((box && box.parentElement ? box.parentElement.innerText : '') || '').replace(/\s+/g, '');
-    if (ctx.indexOf('鏉＄爜閲囬泦') >= 0) return all[i];
+    if (ctx.indexOf('条码采集') >= 0) return all[i];
   }
   return all[3] || null;
 }
@@ -2055,7 +2091,7 @@ function __findInputByCode(code) {
   return null;
 }
 
-// ===== 澶勭悊鍗曟潯SN =====
+// ===== 处理单条SN =====
 async function __processSn(sn) {
   if (!sn || __snProcessed.has(sn)) {
     if (__snProcessed.has(sn)) __addLog(sn, '', 'duplicate');
@@ -2065,7 +2101,7 @@ async function __processSn(sn) {
   __snProcessed.add(sn);
   var item = { sn: sn, code: '', status: 'querying' };
   __snQueue.push(item);
-  __addLog(sn, '鏌ヨ涓?..', '');
+  __addLog(sn, '查询中...', '');
 
   try {
     var q = await queryCodeHybrid(sn);
@@ -2077,7 +2113,7 @@ async function __processSn(sn) {
       if (target) {
         item.status = 'success';
 
-        // 璋冪敤鍘熻剼鏈嚱鏁板～鍏?鈫?瑙﹀彂绯荤粺鏍￠獙
+        // 调用原脚本函数填入 → 触发系统校验
         target.value = sn;
         target.dispatchEvent(new Event('input', { bubbles: true }));
         target.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2104,7 +2140,7 @@ async function __processSn(sn) {
   }
 
   var countEl = document.getElementById('__sn_count');
-  if (countEl) countEl.textContent = __snQueue.length + '鏉?;
+  if (countEl) countEl.textContent = __snQueue.length + '条';
 }
 
 function __addLog(sn, code, status) {
@@ -2113,19 +2149,19 @@ function __addLog(sn, code, status) {
   var el = document.getElementById('__sn_logs');
   if (!el) return;
   el.innerHTML = __snLogs.map(function(l) {
-    var c = '#888', p = '路';
-    if (l.status === 'success') { c = '#389e0d'; p = '鉁?; }
-    else if (l.status === 'duplicate') { c = '#d4380d'; p = '鈯?; }
-    else if (l.status === 'error') { c = '#d4380d'; p = '鉁?; }
-    else if (l.status === 'skip') { c = '#999'; p = '鈫?; }
+    var c = '#888', p = '·';
+    if (l.status === 'success') { c = '#389e0d'; p = '✓'; }
+    else if (l.status === 'duplicate') { c = '#d4380d'; p = '⊗'; }
+    else if (l.status === 'error') { c = '#d4380d'; p = '✗'; }
+    else if (l.status === 'skip') { c = '#999'; p = '→'; }
     var t = l.sn;
-    if (l.code) t += ' 鈫?' + l.code;
+    if (l.code) t += ' → ' + l.code;
     return '<div style="padding:2px 8px;font-size:11px;color:' + c + ';border-bottom:1px solid #f5f5f5;">' + p + ' ' + t + '</div>';
   }).join('');
   el.scrollTop = 0;
 }
 
-// ===== 闈㈡澘绠＄悊 =====
+// ===== 面板管理 =====
 function __savePos(left, top) {
   try { localStorage.setItem(__panelPosKey, JSON.stringify({ left: left, top: top })); } catch (e) {}
 }
@@ -2146,15 +2182,15 @@ function __createPanel() {
 
   panel.innerHTML =
     '<div id="__sn_head" style="padding:8px 12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;background:#fff;cursor:move;user-select:none;">' +
-      '<span style="font-weight:600;">SN杞～</span>' +
-      '<span id="__sn_count" style="color:#888;font-size:11px;">0鏉?/span>' +
+      '<span style="font-weight:600;">SN转填</span>' +
+      '<span id="__sn_count" style="color:#888;font-size:11px;">0条</span>' +
     '</div>' +
     '<div style="padding:8px 12px;">' +
-      '<input id="__sn_input" placeholder="鎵玈N鏉＄爜" style="width:100%;box-sizing:border-box;height:32px;border:1px solid #d9d9d9;border-radius:4px;padding:0 8px;font-size:13px;outline:none;" onfocus="this.style.borderColor=\'#69b1ff\'" onblur="this.style.borderColor=\'#d9d9d9\'">' +
+      '<input id="__sn_input" placeholder="扫SN条码" style="width:100%;box-sizing:border-box;height:32px;border:1px solid #d9d9d9;border-radius:4px;padding:0 8px;font-size:13px;outline:none;" onfocus="this.style.borderColor=\'#69b1ff\'" onblur="this.style.borderColor=\'#d9d9d9\'">' +
     '</div>' +
     '<div style="padding:4px 12px;border-top:1px solid #f5f5f5;display:flex;justify-content:space-between;align-items:center;background:#fff;">' +
       '<span id="__sn_hint" style="color:#888;font-size:11px;"></span>' +
-      '<button id="__sn_clear" style="border:none;background:none;color:#999;font-size:10px;cursor:pointer;">娓呯┖</button>' +
+      '<button id="__sn_clear" style="border:none;background:none;color:#999;font-size:10px;cursor:pointer;">清空</button>' +
     '</div>' +
     '<div id="__sn_logs" style="max-height:200px;overflow:auto;min-height:20px;background:#fafafa;"></div>';
 
@@ -2172,10 +2208,10 @@ function __createPanel() {
   panel.querySelector('#__sn_clear').onclick = function() {
     __snProcessed.clear(); __snQueue = []; __snLogs = [];
     var el = document.getElementById('__sn_logs'); if (el) el.innerHTML = '';
-    var ce = document.getElementById('__sn_count'); if (ce) ce.textContent = '0鏉?;
+    var ce = document.getElementById('__sn_count'); if (ce) ce.textContent = '0条';
   };
 
-  // 鎷栨嫿
+  // 拖拽
   (function(h) {
     var dn = false, sx, sy, ox, oy;
     h.addEventListener('mousedown', function(e) {
@@ -2206,7 +2242,7 @@ function __showHint(text) {
   if (el) el.textContent = text || '';
 }
 
-// ===== BOM妫€娴嬶細鍑虹幇鈫掑脊妗嗭紝娑堝け鈫掑垹妗?鐒︾偣鍥炴潯鐮佹 =====
+// ===== BOM检测：出现→弹框，消失→删框+焦点回条码框 =====
 setInterval(function() {
   if (!location.href || location.href.indexOf('#/ProductTrackInOut') < 0) return;
 
@@ -2216,7 +2252,7 @@ setInterval(function() {
   if (now && !__bomListActive) {
     __bomListActive = true;
     __createPanel();
-    __showHint('BOM ' + count + '椤?);
+    __showHint('BOM ' + count + '项');
   }
 
   if (!now && __bomListActive) {
@@ -2236,12 +2272,13 @@ document.addEventListener('keydown', function(e) {
   if (e.ctrlKey && (e.key === 'q' || e.key === 'Q')) { e.preventDefault(); __createPanel(); }
 }, true);
 
-// 鎺у埗鍙?window.SnFill = {
+// 控制台
+window.SnFill = {
   scan: function(s) { __processSn(s); },
   open: function() { __createPanel(); var i = document.getElementById('__sn_input'); if (i) i.focus(); },
   state: function() { return { processed: __snProcessed.size, queue: __snQueue.length, logs: __snLogs.length, bomActive: __bomListActive }; }
 };
 
-console.log('[SnFill] 宸插姞杞? Ctrl+Q 鎵撳紑');
+console.log('[SnFill] 已加载, Ctrl+Q 打开');
 
 })();
