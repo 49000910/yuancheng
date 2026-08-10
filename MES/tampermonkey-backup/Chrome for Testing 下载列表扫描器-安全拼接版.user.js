@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         Chrome for Testing 涓嬭浇鍒楄〃鎵弿鍣?瀹夊叏鎷兼帴鐗?// @namespace    local.chrome-for-testing-safe
+// @name         Chrome for Testing 下载列表扫描器-安全拼接版
+// @namespace    local.chrome-for-testing-safe
 // @version      2.1.0
-// @description  浣跨敤瀹樻柟 JSON 鎴栫洿鎺ユ帰娴嬩笅杞藉湴鍧€锛屽垪鍑?Chrome for Testing 鐗堟湰涓嬭浇閾炬帴
+// @description  使用官方 JSON 或直接探测下载地址，列出 Chrome for Testing 版本下载链接
 // @author       local
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
@@ -148,7 +149,7 @@
                     reject(err);
                 },
                 ontimeout: function () {
-                    reject(new Error('璇锋眰瓒呮椂'));
+                    reject(new Error('请求超时'));
                 }
             });
         });
@@ -241,7 +242,7 @@
         }
 
         if (!state.versions.length) {
-            box.innerHTML = '<div class="cft-tip">鏆傛棤缁撴灉銆?/div>';
+            box.innerHTML = '<div class="cft-tip">暂无结果。</div>';
             return;
         }
 
@@ -269,7 +270,7 @@
             '<table id="cft-table">' +
                 '<thead>' +
                     '<tr>' +
-                        '<th style="width:150px;">鐗堟湰</th>' +
+                        '<th style="width:150px;">版本</th>' +
                         '<th>Chrome</th>' +
                         '<th>ChromeDriver</th>' +
                         '<th>Headless Shell</th>' +
@@ -298,7 +299,7 @@
         state.versions = [];
         render();
 
-        setStatus('姝ｅ湪璇诲彇瀹樻柟 JSON 绱㈠紩...');
+        setStatus('正在读取官方 JSON 索引...');
 
         var json = await getJson(JSON_URL);
         var versions = json.versions || [];
@@ -344,7 +345,7 @@
         state.versions = result;
         render();
 
-        setStatus('瀹樻柟 JSON 璇诲彇瀹屾垚锛屽叡 ' + result.length + ' 涓増鏈€?);
+        setStatus('官方 JSON 读取完成，共 ' + result.length + ' 个版本。');
     }
 
     function uniqueArray(arr) {
@@ -369,17 +370,17 @@
         var platform = document.querySelector('#cft-platform').value;
 
         if (!prefix) {
-            alert('璇峰～鍐欑増鏈墠缂€锛屼緥濡傦細146.0.7680.');
+            alert('请填写版本前缀，例如：146.0.7680.');
             return;
         }
 
         if (prefix.charAt(prefix.length - 1) !== '.') {
-            alert('鐗堟湰鍓嶇紑寤鸿浠ョ偣缁撳熬锛屼緥濡傦細146.0.7680.');
+            alert('版本前缀建议以点结尾，例如：146.0.7680.');
             return;
         }
 
         if (isNaN(start) || isNaN(end) || start > end) {
-            alert('鎺㈡祴鑼冨洿涓嶆纭?);
+            alert('探测范围不正确');
             return;
         }
 
@@ -393,7 +394,7 @@
         var total = end - start + 1;
         var concurrency = 10;
 
-        setStatus('寮€濮嬫帰娴?' + prefix + start + ' 鍒?' + prefix + end + ' ...');
+        setStatus('开始探测 ' + prefix + start + ' 到 ' + prefix + end + ' ...');
 
         async function worker() {
             while (current <= end) {
@@ -417,7 +418,7 @@
                     render();
                 }
 
-                setStatus('鎺㈡祴涓細' + finished + '/' + total + '\n宸插彂鐜帮細' + found.length + ' 涓増鏈?);
+                setStatus('探测中：' + finished + '/' + total + '\n已发现：' + found.length + ' 个版本');
             }
         }
 
@@ -437,12 +438,12 @@
         state.versions = found;
         render();
 
-        setStatus('鎺㈡祴瀹屾垚锛屽叡鍙戠幇 ' + found.length + ' 涓増鏈€?);
+        setStatus('探测完成，共发现 ' + found.length + ' 个版本。');
     }
 
     function copyAll() {
         if (!state.versions.length) {
-            setStatus('娌℃湁鍙鍒剁殑缁撴灉銆?);
+            setStatus('没有可复制的结果。');
             return;
         }
 
@@ -462,7 +463,7 @@
         }
 
         GM_setClipboard(blocks.join('\n\n'));
-        setStatus('宸插鍒?' + state.versions.length + ' 涓増鏈殑涓嬭浇閾炬帴銆?);
+        setStatus('已复制 ' + state.versions.length + ' 个版本的下载链接。');
     }
 
     function buildPlatformOptions() {
@@ -499,57 +500,57 @@
         var html = [];
 
         html.push('<div id="cft-head">');
-        html.push('<h2>Chrome for Testing 涓嬭浇鍒楄〃鎵弿鍣?/h2>');
-        html.push('<button id="cft-close">鍏抽棴</button>');
+        html.push('<h2>Chrome for Testing 下载列表扫描器</h2>');
+        html.push('<button id="cft-close">关闭</button>');
         html.push('</div>');
 
         html.push('<div id="cft-body">');
 
         html.push('<div class="cft-row">');
-        html.push('<label>澶х増鏈細');
-        html.push('<input id="cft-major" value="146" style="width:100px;" placeholder="渚嬪 146">');
+        html.push('<label>大版本：');
+        html.push('<input id="cft-major" value="146" style="width:100px;" placeholder="例如 146">');
         html.push('</label>');
 
-        html.push('<label>骞冲彴锛?);
+        html.push('<label>平台：');
         html.push('<select id="cft-platform">');
         html.push(platformOptions);
         html.push('</select>');
         html.push('</label>');
 
-        html.push('<button id="cft-json">璇诲彇瀹樻柟 JSON</button>');
-        html.push('<button id="cft-copy" class="secondary">澶嶅埗鍏ㄩ儴閾炬帴</button>');
+        html.push('<button id="cft-json">读取官方 JSON</button>');
+        html.push('<button id="cft-copy" class="secondary">复制全部链接</button>');
         html.push('</div>');
 
         html.push('<div class="cft-tip">');
-        html.push('浼樺厛浣跨敤鈥滆鍙栧畼鏂?JSON鈥濄€傚鏋滃叕鍙镐篃鎷︿簡 googlechromelabs.github.io锛屽啀鐢ㄤ笅闈㈢殑鈥滃墠缂€鎺㈡祴鈥濄€?);
+        html.push('优先使用“读取官方 JSON”。如果公司也拦了 googlechromelabs.github.io，再用下面的“前缀探测”。');
         html.push('</div>');
 
         html.push('<div class="cft-row">');
 
-        html.push('<label>鐗堟湰鍓嶇紑锛?);
-        html.push('<input id="cft-prefix" value="146.0.7680." style="width:170px;" placeholder="渚嬪 146.0.7680.">');
+        html.push('<label>版本前缀：');
+        html.push('<input id="cft-prefix" value="146.0.7680." style="width:170px;" placeholder="例如 146.0.7680.">');
         html.push('</label>');
 
-        html.push('<label>璧峰锛?);
+        html.push('<label>起始：');
         html.push('<input id="cft-start" value="0" style="width:70px;">');
         html.push('</label>');
 
-        html.push('<label>缁撴潫锛?);
+        html.push('<label>结束：');
         html.push('<input id="cft-end" value="200" style="width:70px;">');
         html.push('</label>');
 
-        html.push('<button id="cft-probe">鎺㈡祴涓嬭浇鍦板潃鏄惁瀛樺湪</button>');
+        html.push('<button id="cft-probe">探测下载地址是否存在</button>');
         html.push('</div>');
 
         html.push('<div class="cft-tip">');
-        html.push('鎺㈡祴鏂瑰紡涓嶄細鍒楃洰褰曪紝鍙槸妫€鏌ョ被浼间笅闈㈢殑鏂囦欢鏄惁瀛樺湪锛?br>');
+        html.push('探测方式不会列目录，只是检查类似下面的文件是否存在：<br>');
         html.push('<code>https://storage.googleapis.com/chrome-for-testing-public/146.0.7680.31/win64/chrome-win64.zip</code>');
         html.push('</div>');
 
-        html.push('<div id="cft-status">绛夊緟鎿嶄綔銆?/div>');
+        html.push('<div id="cft-status">等待操作。</div>');
 
         html.push('<div id="cft-result">');
-        html.push('<div class="cft-tip">鏆傛棤缁撴灉銆?/div>');
+        html.push('<div class="cft-tip">暂无结果。</div>');
         html.push('</div>');
 
         html.push('</div>');
@@ -567,7 +568,7 @@
                 await loadFromOfficialJson();
             } catch (e) {
                 console.error(e);
-                setStatus('瀹樻柟 JSON 璇诲彇澶辫触锛? + (e.message || e) + '\n鍙互鏀圭敤鈥滃墠缂€鎺㈡祴鈥濄€?);
+                setStatus('官方 JSON 读取失败：' + (e.message || e) + '\n可以改用“前缀探测”。');
             }
         };
 
@@ -576,7 +577,7 @@
                 await probeByPrefix();
             } catch (e) {
                 console.error(e);
-                setStatus('鎺㈡祴澶辫触锛? + (e.message || e));
+                setStatus('探测失败：' + (e.message || e));
             }
         };
 
@@ -590,7 +591,7 @@
         };
     }
 
-    GM_registerMenuCommand('鎵撳紑 Chrome for Testing 涓嬭浇鍒楄〃鎵弿鍣?, showPanel);
+    GM_registerMenuCommand('打开 Chrome for Testing 下载列表扫描器', showPanel);
 
     if (location.hostname === 'storage.googleapis.com') {
         setTimeout(function () {
