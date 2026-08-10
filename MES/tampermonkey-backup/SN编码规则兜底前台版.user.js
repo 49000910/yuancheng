@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         SN缂栫爜瑙勫垯鍏滃簳鍓嶅彴鐗?// @namespace    mes.sn.rule.fallback.ui
+// @name         SN编码规则兜底前台版
+// @namespace    mes.sn.rule.fallback.ui
 // @version      1.6
-// @description  SN鎺ュ彛鏌ヤ笉鍒扮紪鐮佹椂鎸夊墠鍙拌鍒欏厹搴曪紱鏀寔鎺ュ彛涓€寮哄瓧娈靛拰鎺ュ彛涓€鎺掗櫎缂栫爜
+// @description  SN接口查不到编码时按前台规则兜底；支持接口一强字段和接口一排除编码
 // @match        https://w3.huawei.com/mespmm/wipweb*
 // @run-at       document-start
 // @grant        none
@@ -16,14 +17,15 @@
   const RULE_KEY = 'sn_code_rule_fallback_rules_v2';
   const ENABLE_KEY = 'sn_code_rule_fallback_enabled_v2';
 
-  // 鎺ュ彛涓€寮哄瓧娈佃鍒?  const STRONG_FIELD_KEY = 'sn_code_rule_fallback_strong_fields_v1';
+  // 接口一强字段规则
+  const STRONG_FIELD_KEY = 'sn_code_rule_fallback_strong_fields_v1';
 
-  // 鎺ュ彛涓€鎺掗櫎缂栫爜
+  // 接口一排除编码
   const EXCLUDE_CODE_KEY = 'sn_code_rule_fallback_exclude_codes_v1';
-// 宸︿晶鏉＄爜娓呮礂瑙勫垯锛屼緵鏍￠獙鑴氭湰璇诲彇
+// 左侧条码清洗规则，供校验脚本读取
 const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
 
-  // 鎺ュ彛涓€ EMS锛岀敤浜庡己瀛楁娴嬭瘯
+  // 接口一 EMS，用于强字段测试
   const EMS_BASE = 'https://w3.huawei.com/mespmm/gateway/com.huawei.supply.mes.mesplus.pspw:mespmmpreallservice/mespmmpreallone/services/emsComponentDataInfo/find/page';
   const EMS_PAGE_SIZE = 100;
   const EMS_MODES = [[0, 0], [7, 0]];
@@ -37,8 +39,8 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
   function normSn(v) {
     v = toStr(v).replace(/\u00A0/g, ' ').replace(/\s+/g, '');
 
-    if (v.indexOf('锛?) >= 0) {
-      v = v.split('锛?).pop();
+    if (v.indexOf('：') >= 0) {
+      v = v.split('：').pop();
     }
 
     if (v.indexOf(':') >= 0) {
@@ -52,11 +54,13 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
     return toStr(v).replace(/\u00A0/g, ' ').replace(/\s+/g, '').toUpperCase();
   }
 
-  // 涓撻棬鐢ㄤ簬鎺ュ彛杩斿洖鍏ㄦ枃/寮哄瓧娈靛尮閰?  // 涓嶈兘鍍?normSn 閭ｆ牱閬囧埌鍐掑彿灏辨埅鏂?  function normSearchText(v) {
+  // 专门用于接口返回全文/强字段匹配
+  // 不能像 normSn 那样遇到冒号就截断
+  function normSearchText(v) {
     return toStr(v)
       .replace(/\u00A0/g, ' ')
       .replace(/\s+/g, '')
-      .replace(/锛?g, ':')
+      .replace(/：/g, ':')
       .toUpperCase();
   }
 
@@ -81,10 +85,13 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
   }
 
   /*
-    閫氶厤瑙勫垯锛?    ? = 浠绘剰 1 浣?    * = 浠绘剰闀垮害锛屽父鐢ㄤ簬鏈熬
-    澶氫釜 * 杩炲湪涓€璧凤紝渚嬪 *******锛屾寜鍥哄畾 7 浣嶅鐞?  */
+    通配规则：
+    ? = 任意 1 位
+    * = 任意长度，常用于末尾
+    多个 * 连在一起，例如 *******，按固定 7 位处理
+  */
   function wildcardToRegExp(pattern) {
-    pattern = normSn(pattern).replace(/锛?g, '*').replace(/锛?g, '?');
+    pattern = normSn(pattern).replace(/＊/g, '*').replace(/？/g, '?');
 
     let out = '^';
 
@@ -127,16 +134,16 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
   function normalizeRuleType(type) {
     type = toStr(type);
 
-    if (type === '寮€澶? || type === '鍓嶇紑') return '寮€澶存槸';
-    if (type === '鍖呮嫭' || type === '鍚湁') return '鍖呭惈';
-    if (type === '绮剧‘' || type === '鐩哥瓑') return '绛変簬';
-    if (type === '閫氶厤绗?) return '閫氶厤';
+    if (type === '开头' || type === '前缀') return '开头是';
+    if (type === '包括' || type === '含有') return '包含';
+    if (type === '精确' || type === '相等') return '等于';
+    if (type === '通配符') return '通配';
 
-    if (['鍖呭惈', '寮€澶存槸', '绛変簬', '閫氶厤'].indexOf(type) >= 0) {
+    if (['包含', '开头是', '等于', '通配'].indexOf(type) >= 0) {
       return type;
     }
 
-    return '鍖呭惈';
+    return '包含';
   }
 
   function getEffectiveType(type, pattern) {
@@ -144,7 +151,7 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
     pattern = normSn(pattern);
 
     if (pattern.indexOf('*') >= 0 || pattern.indexOf('?') >= 0) {
-      return '閫氶厤';
+      return '通配';
     }
 
     return type;
@@ -160,7 +167,7 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
         }).map(function (r) {
           return {
             code: normCode(r.code),
-            type: normalizeRuleType(r.type || '鍖呭惈'),
+            type: normalizeRuleType(r.type || '包含'),
             pattern: normSn(r.pattern),
             note: toStr(r.note || '')
           };
@@ -189,7 +196,7 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
     updateMiniButton();
   }
 
-  // ===== 鎺ュ彛涓€寮哄瓧娈佃鍒?=====
+  // ===== 接口一强字段规则 =====
 
   function loadStrongFields() {
     try {
@@ -243,7 +250,7 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
 
       if (!field || !code) continue;
 
-      // 寮哄瓧娈靛睘浜庢帴鍙ｄ竴锛屾墍浠ュ彈鎺ュ彛涓€鎺掗櫎缂栫爜闄愬埗
+      // 强字段属于接口一，所以受接口一排除编码限制
       if (isExcludedCodeForEms(code)) continue;
 
       if (text.indexOf(field) >= 0) {
@@ -356,7 +363,7 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
     };
   }
 
-  // ===== 鎺ュ彛涓€鎺掗櫎缂栫爜 =====
+  // ===== 接口一排除编码 =====
 
   function loadExcludeCodes() {
     try {
@@ -383,8 +390,8 @@ const LEFT_CLEAN_KEY = 'sn_code_left_clean_rules_v1';
         x = toStr(x)
           .replace(/\u00A0/g, ' ')
           .replace(/\s+/g, '')
-          .replace(/锛?g, ':')
-          .replace(/锛?g, '-');
+          .replace(/：/g, ':')
+          .replace(/－/g, '-');
 
         if (x && out.indexOf(x) < 0) {
           out.push(x);
@@ -407,8 +414,8 @@ function saveLeftCleanRules(rules) {
     x = toStr(x)
       .replace(/\u00A0/g, ' ')
       .replace(/\s+/g, '')
-      .replace(/锛?g, ':')
-      .replace(/锛?g, '-');
+      .replace(/：/g, ':')
+      .replace(/－/g, '-');
 
     if (x && clean.indexOf(x) < 0) {
       clean.push(x);
@@ -455,7 +462,7 @@ function readLeftCleanRulesFromBox() {
 
     const excludes = loadExcludeCodes();
 
-    // 鍥哄畾瀹屽叏鍖归厤
+    // 固定完全匹配
     return excludes.indexOf(code) >= 0;
   }
 
@@ -499,7 +506,7 @@ function readLeftCleanRulesFromBox() {
   function injectStrongCodeToEmsResult(j, hit) {
     if (!j || !hit || !hit.code) return j;
 
-    // 寮哄瓧娈靛睘浜庢帴鍙ｄ竴锛屾墍浠ュ彈鎺ュ彛涓€鎺掗櫎缂栫爜闄愬埗
+    // 强字段属于接口一，所以受接口一排除编码限制
     if (isExcludedCodeForEms(hit.code)) return j;
 
     if (!j.resultObjVO || typeof j.resultObjVO !== 'object') {
@@ -510,7 +517,8 @@ function readLeftCleanRulesFromBox() {
       j.resultObjVO.result = [];
     }
 
-    // 鎻掑叆鏈€鍓嶉潰锛屼繚璇佸師鏍￠獙鑴氭湰 pickFirstMatchedCode 浼樺厛鎹″埌瀹?    j.resultObjVO.result.unshift({
+    // 插入最前面，保证原校验脚本 pickFirstMatchedCode 优先捡到它
+    j.resultObjVO.result.unshift({
       __snRuleStrongField: true,
       __snRuleField: hit.field,
       __snRuleNote: hit.note || '',
@@ -523,7 +531,7 @@ function readLeftCleanRulesFromBox() {
     return j;
   }
 
-  // ===== SN瑙勫垯鍏滃簳 =====
+  // ===== SN规则兜底 =====
 
   function matchRule(snRaw) {
     const sn = normSn(snRaw);
@@ -542,13 +550,13 @@ function readLeftCleanRulesFromBox() {
 
       let ok = false;
 
-      if (type === '寮€澶存槸') {
+      if (type === '开头是') {
         ok = sn.startsWith(value);
-      } else if (type === '鍖呭惈') {
+      } else if (type === '包含') {
         ok = sn.indexOf(value) >= 0;
-      } else if (type === '绛変簬') {
+      } else if (type === '等于') {
         ok = sn === value;
-      } else if (type === '閫氶厤') {
+      } else if (type === '通配') {
         ok = wildcardToRegExp(value).test(sn);
       } else {
         ok = sn.indexOf(value) >= 0;
@@ -611,7 +619,7 @@ function readLeftCleanRulesFromBox() {
 
       const url = getFetchUrl(input);
 
-      // ===== 鎺ュ彛涓€ EMS find/page锛氬己瀛楁 + 鎺ュ彛涓€鎺掗櫎缂栫爜 =====
+      // ===== 接口一 EMS find/page：强字段 + 接口一排除编码 =====
       if (isEmsFindUrl(url)) {
         const clone = res.clone();
 
@@ -635,22 +643,22 @@ function readLeftCleanRulesFromBox() {
 
         const hit = matchStrongFieldInText(text);
 
-        // 鍏堟竻闄ゆ帴鍙ｄ竴鎺掗櫎缂栫爜锛岄伩鍏嶅師寮虹紪鐮佽鍛戒腑
+        // 先清除接口一排除编码，避免原强编码误命中
         const before = JSON.stringify(j);
         j = sanitizeExcludedCodesDeepForEms(j);
         const after = JSON.stringify(j);
 
         if (before !== after) {
           changed = true;
-          console.log('[SN瑙勫垯鍏滃簳] 鎺ュ彛涓€宸叉竻闄ゆ帓闄ょ紪鐮?);
+          console.log('[SN规则兜底] 接口一已清除排除编码');
         }
 
-        // 鍐嶆彃鍏ュ己瀛楁缂栫爜
+        // 再插入强字段编码
         if (hit && hit.code && !isExcludedCodeForEms(hit.code)) {
           injectStrongCodeToEmsResult(j, hit);
           changed = true;
           console.log(
-            '[SN瑙勫垯鍏滃簳] 鎺ュ彛涓€寮哄瓧娈靛懡涓?',
+            '[SN规则兜底] 接口一强字段命中:',
             hit.field,
             '=>',
             hit.code
@@ -664,7 +672,7 @@ function readLeftCleanRulesFromBox() {
         return res;
       }
 
-      // ===== 鎺ュ彛浜?OpenAPI锛氫笉浣跨敤鎺掗櫎缂栫爜锛屽彧鍋歋N瑙勫垯鍏滃簳 =====
+      // ===== 接口二 OpenAPI：不使用排除编码，只做SN规则兜底 =====
       if (isOpenApiUrl(url)) {
         const reqBody = getFetchBody(input, init);
         let sn = '';
@@ -677,7 +685,7 @@ function readLeftCleanRulesFromBox() {
         }
 
         if (!sn) {
-          console.log('[SN瑙勫垯鍏滃簳] openapi 鏈彇鍒癝N锛岃烦杩?);
+          console.log('[SN规则兜底] openapi 未取到SN，跳过');
           return res;
         }
 
@@ -701,15 +709,17 @@ function readLeftCleanRulesFromBox() {
         const vo = j.resultObjVO;
         const nowCode = normCode(vo.partNo || '');
 
-        // 鎺ュ彛浜?OpenAPI 涓嶄娇鐢ㄦ帓闄ょ紪鐮?        // 鎺ュ彛鏈潵鏈夌紪鐮侊紝涓嶅厹搴?        if (nowCode) {
-          console.log('[SN瑙勫垯鍏滃簳] 鎺ュ彛浜屽凡鏈夌紪鐮侊紝涓嶅厹搴?', sn, nowCode);
+        // 接口二 OpenAPI 不使用排除编码
+        // 接口本来有编码，不兜底
+        if (nowCode) {
+          console.log('[SN规则兜底] 接口二已有编码，不兜底:', sn, nowCode);
           return jsonResponseLike(res, j);
         }
 
         const hit = matchRule(sn);
 
         if (!hit || !hit.code) {
-          console.log('[SN瑙勫垯鍏滃簳] SN瑙勫垯鏈懡涓?', sn);
+          console.log('[SN规则兜底] SN规则未命中:', sn);
           return jsonResponseLike(res, j);
         }
 
@@ -721,13 +731,13 @@ function readLeftCleanRulesFromBox() {
         });
 
         console.log(
-          '[SN瑙勫垯鍏滃簳] SN瑙勫垯鍛戒腑:',
+          '[SN规则兜底] SN规则命中:',
           sn,
           '=>',
           hit.code,
-          '鏂瑰紡:',
+          '方式:',
           hit.type,
-          '瑙勫垯:',
+          '规则:',
           hit.pattern
         );
 
@@ -737,12 +747,12 @@ function readLeftCleanRulesFromBox() {
       return res;
 
     } catch (e) {
-      console.warn('[SN瑙勫垯鍏滃簳] 寮傚父:', e);
+      console.warn('[SN规则兜底] 异常:', e);
       return res;
     }
   };
 
-  // ===== 鍓嶅彴UI =====
+  // ===== 前台UI =====
 
   function updateMiniButton() {
     const count = document.getElementById('sn-rule-count');
@@ -772,7 +782,7 @@ function readLeftCleanRulesFromBox() {
 
     if (state) {
       enabled = localStorage.getItem(ENABLE_KEY) !== '0';
-      state.textContent = enabled ? '寮€' : '鍏?;
+      state.textContent = enabled ? '开' : '关';
       state.style.color = enabled ? '#389e0d' : '#d4380d';
     }
   }
@@ -801,13 +811,13 @@ function readLeftCleanRulesFromBox() {
     `;
 
       btn.innerHTML = `
-  SN瑙勫垯:<b id="sn-rule-count">${loadRules().length}</b>
-  寮哄瓧娈?<b id="sn-strong-count">${loadStrongFields().length}</b>
-  鎺ュ彛涓€鎺掗櫎:<b id="sn-exclude-count">${loadExcludeCodes().length}</b>
-  宸︽竻娲?<b id="sn-left-clean-count">${loadLeftCleanRules().length}</b>
-      <span style="margin-left:4px;">鐘舵€?</span>
+  SN规则:<b id="sn-rule-count">${loadRules().length}</b>
+  强字段:<b id="sn-strong-count">${loadStrongFields().length}</b>
+  接口一排除:<b id="sn-exclude-count">${loadExcludeCodes().length}</b>
+  左清洗:<b id="sn-left-clean-count">${loadLeftCleanRules().length}</b>
+      <span style="margin-left:4px;">状态:</span>
       <b id="sn-rule-state" style="color:${enabled ? '#389e0d' : '#d4380d'};">
-        ${enabled ? '寮€' : '鍏?}
+        ${enabled ? '开' : '关'}
       </b>
     `;
 
@@ -819,7 +829,7 @@ function readLeftCleanRulesFromBox() {
   function createEmptyRule() {
     return {
       code: '',
-      type: '鍖呭惈',
+      type: '包含',
       pattern: '',
       note: ''
     };
@@ -845,13 +855,13 @@ function readLeftCleanRulesFromBox() {
 
       const code = normCode(codeEl ? codeEl.value : '');
 
-      let type = '鍖呭惈';
+      let type = '包含';
 
       if (typeEl) {
         if (typeEl.selectedIndex >= 0 && typeEl.options[typeEl.selectedIndex]) {
           type = toStr(typeEl.options[typeEl.selectedIndex].value);
         } else {
-          type = toStr(typeEl.value || '鍖呭惈');
+          type = toStr(typeEl.value || '包含');
         }
       }
 
@@ -903,7 +913,7 @@ function readLeftCleanRulesFromBox() {
     const text = el ? el.value : '';
 
     return text
-      .split(/[\s,锛?锛沑n\r]+/)
+      .split(/[\s,，;；\n\r]+/)
       .map(function (x) {
         return codeExact(x);
       })
@@ -930,16 +940,16 @@ function readLeftCleanRulesFromBox() {
     updateMiniButton();
 
     setRuleMsg(
-  '宸蹭繚瀛橈細SN瑙勫垯 ' + rules.length +
-  ' 鏉★紝寮哄瓧娈?' + strongRules.length +
-  ' 鏉★紝鎺ュ彛涓€鎺掗櫎缂栫爜 ' + excludeCodes.length +
-  ' 涓紝宸︿晶娓呮礂瑙勫垯 ' + leftCleanRules.length + ' 鏉?
+  '已保存：SN规则 ' + rules.length +
+  ' 条，强字段 ' + strongRules.length +
+  ' 条，接口一排除编码 ' + excludeCodes.length +
+  ' 个，左侧清洗规则 ' + leftCleanRules.length + ' 条'
 );
 
 
-    console.log('[SN瑙勫垯鍏滃簳] 宸蹭繚瀛楽N瑙勫垯锛?, rules);
-    console.log('[SN瑙勫垯鍏滃簳] 宸蹭繚瀛樺己瀛楁锛?, strongRules);
-    console.log('[SN瑙勫垯鍏滃簳] 宸蹭繚瀛樻帴鍙ｄ竴鎺掗櫎缂栫爜锛?, excludeCodes);
+    console.log('[SN规则兜底] 已保存SN规则：', rules);
+    console.log('[SN规则兜底] 已保存强字段：', strongRules);
+    console.log('[SN规则兜底] 已保存接口一排除编码：', excludeCodes);
   }
 
   function setRuleMsg(msg, color) {
@@ -953,16 +963,16 @@ function readLeftCleanRulesFromBox() {
   function ruleRowHtml(r, i) {
     r = r || createEmptyRule();
 
-    const currType = normalizeRuleType(r.type || '鍖呭惈');
+    const currType = normalizeRuleType(r.type || '包含');
 
-    const types = ['鍖呭惈', '寮€澶存槸', '绛変簬', '閫氶厤'];
+    const types = ['包含', '开头是', '等于', '通配'];
 
     return `
       <tr>
         <td style="border:1px solid #eee;padding:4px;text-align:center;width:40px;">${i + 1}</td>
 
         <td style="border:1px solid #eee;padding:4px;width:120px;">
-          <input class="sn-rule-code" value="${escHtml(r.code || '')}" placeholder="濡?34100239" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-rule-code" value="${escHtml(r.code || '')}" placeholder="如 34100239" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;width:90px;">
@@ -974,15 +984,15 @@ function readLeftCleanRulesFromBox() {
         </td>
 
         <td style="border:1px solid #eee;padding:4px;width:150px;">
-          <input class="sn-rule-pattern" value="${escHtml(r.pattern || '')}" placeholder="濡?K179 / K???????" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-rule-pattern" value="${escHtml(r.pattern || '')}" placeholder="如 K179 / K???????" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;">
-          <input class="sn-rule-note" value="${escHtml(r.note || '')}" placeholder="澶囨敞锛屽彲涓嶅～" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-rule-note" value="${escHtml(r.note || '')}" placeholder="备注，可不填" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;text-align:center;width:60px;">
-          <button class="sn-rule-del" style="font-size:12px;height:24px;color:#d4380d;">鍒犻櫎</button>
+          <button class="sn-rule-del" style="font-size:12px;height:24px;color:#d4380d;">删除</button>
         </td>
       </tr>
     `;
@@ -996,19 +1006,19 @@ function readLeftCleanRulesFromBox() {
         <td style="border:1px solid #eee;padding:4px;text-align:center;width:40px;">${i + 1}</td>
 
         <td style="border:1px solid #eee;padding:4px;width:210px;">
-          <input class="sn-strong-field" value="${escHtml(r.field || '')}" placeholder="濡?OC8072V1H74S" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-strong-field" value="${escHtml(r.field || '')}" placeholder="如 OC8072V1H74S" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;width:120px;">
-          <input class="sn-strong-code" value="${escHtml(r.code || '')}" placeholder="濡?34090213" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-strong-code" value="${escHtml(r.code || '')}" placeholder="如 34090213" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;">
-          <input class="sn-strong-note" value="${escHtml(r.note || '')}" placeholder="澶囨敞锛屽彲涓嶅～" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
+          <input class="sn-strong-note" value="${escHtml(r.note || '')}" placeholder="备注，可不填" style="width:100%;height:24px;box-sizing:border-box;font-size:12px;">
         </td>
 
         <td style="border:1px solid #eee;padding:4px;text-align:center;width:60px;">
-          <button class="sn-strong-del" style="font-size:12px;height:24px;color:#d4380d;">鍒犻櫎</button>
+          <button class="sn-strong-del" style="font-size:12px;height:24px;color:#d4380d;">删除</button>
         </td>
       </tr>
     `;
@@ -1113,7 +1123,7 @@ if (leftCleanBox) {
     const sn = normSn(input ? input.value : '');
 
     if (!sn) {
-      setRuleMsg('璇疯緭鍏ユ祴璇昐N', '#d4380d');
+      setRuleMsg('请输入测试SN', '#d4380d');
       return;
     }
 
@@ -1130,13 +1140,13 @@ if (leftCleanBox) {
 
       let ok = false;
 
-      if (type === '鍖呭惈') {
+      if (type === '包含') {
         ok = sn.indexOf(value) >= 0;
-      } else if (type === '寮€澶存槸') {
+      } else if (type === '开头是') {
         ok = sn.startsWith(value);
-      } else if (type === '绛変簬') {
+      } else if (type === '等于') {
         ok = sn === value;
-      } else if (type === '閫氶厤') {
+      } else if (type === '通配') {
         ok = wildcardToRegExp(value).test(sn);
       }
 
@@ -1153,11 +1163,11 @@ if (leftCleanBox) {
 
     if (hit) {
       setRuleMsg(
-        'SN瑙勫垯娴嬭瘯鍛戒腑锛? + sn + ' => ' + hit.code + '锛岀 ' + hit.index + ' 琛岋紝' + hit.type + ' ' + hit.pattern,
+        'SN规则测试命中：' + sn + ' => ' + hit.code + '，第 ' + hit.index + ' 行，' + hit.type + ' ' + hit.pattern,
         '#389e0d'
       );
     } else {
-      setRuleMsg('SN瑙勫垯娴嬭瘯鏈懡涓細' + sn, '#d4380d');
+      setRuleMsg('SN规则测试未命中：' + sn, '#d4380d');
     }
   }
 
@@ -1166,35 +1176,35 @@ if (leftCleanBox) {
     const sn = normSn(input ? input.value : '');
 
     if (!sn) {
-      setRuleMsg('璇疯緭鍏ヨ鏌ヨ鐨勫簭鍒楀彿SN', '#d4380d');
+      setRuleMsg('请输入要查询的序列号SN', '#d4380d');
       return;
     }
 
-    setRuleMsg('鎺ュ彛涓€鏌ヨ涓細' + sn + ' ...', '#d48806');
+    setRuleMsg('接口一查询中：' + sn + ' ...', '#d48806');
 
     try {
       const ret = await queryEmsStrongFieldBySn(sn);
 
       if (ret.hit) {
         setRuleMsg(
-          '寮哄瓧娈靛懡涓細SN ' + sn +
-          '锛屽瓧娈?' + ret.hit.field +
-          ' => 缂栫爜 ' + ret.hit.code +
-          '锛屾ā寮?' + ret.mode +
-          '锛宺ows ' + ret.rows,
+          '强字段命中：SN ' + sn +
+          '，字段 ' + ret.hit.field +
+          ' => 编码 ' + ret.hit.code +
+          '，模式 ' + ret.mode +
+          '，rows ' + ret.rows,
           '#389e0d'
         );
       } else {
         setRuleMsg(
-          '寮哄瓧娈垫湭鍛戒腑锛歋N ' + sn +
-          '锛屽凡鏌ユ帴鍙ｄ竴 pages ' + ret.pages +
-          '锛宺ows ' + ret.rows,
+          '强字段未命中：SN ' + sn +
+          '，已查接口一 pages ' + ret.pages +
+          '，rows ' + ret.rows,
           '#d4380d'
         );
       }
     } catch (e) {
-      setRuleMsg('鎺ュ彛涓€鏌ヨ寮傚父锛? + e, '#d4380d');
-      console.warn('[SN瑙勫垯鍏滃簳] 寮哄瓧娈垫祴璇曞紓甯?, e);
+      setRuleMsg('接口一查询异常：' + e, '#d4380d');
+      console.warn('[SN规则兜底] 强字段测试异常', e);
     }
   }
 
@@ -1241,8 +1251,8 @@ function showRuleModal() {
       align-items:center;
       justify-content:space-between;
     ">
-      <b>SN缂栫爜瑙勫垯鍏滃簳璁剧疆</b>
-      <button id="sn-rule-close" style="font-size:12px;">鍏抽棴</button>
+      <b>SN编码规则兜底设置</b>
+      <button id="sn-rule-close" style="font-size:12px;">关闭</button>
     </div>
 
     <div style="
@@ -1255,11 +1265,11 @@ function showRuleModal() {
     ">
       <label>
         <input id="sn-rule-enabled" type="checkbox" ${enabled ? 'checked' : ''}>
-        鍚敤瑙勫垯鍏滃簳
+        启用规则兜底
       </label>
 
-      <button id="sn-rule-save" style="font-size:12px;height:24px;color:#389e0d;">淇濆瓨鍏ㄩ儴</button>
-      <button id="sn-rule-clear" style="font-size:12px;height:24px;color:#d4380d;">娓呯┖鍏ㄩ儴</button>
+      <button id="sn-rule-save" style="font-size:12px;height:24px;color:#389e0d;">保存全部</button>
+      <button id="sn-rule-clear" style="font-size:12px;height:24px;color:#d4380d;">清空全部</button>
 
       <span id="sn-rule-msg" style="margin-left:6px;color:#389e0d;"></span>
     </div>
@@ -1273,76 +1283,82 @@ function showRuleModal() {
 
       <div style="margin-bottom:14px;border:1px solid #ddd;border-radius:6px;overflow:hidden;">
         <div style="background:#fafafa;padding:7px 10px;font-weight:bold;">
-          涓€銆丼N瑙勫垯鍏滃簳锛氭帴鍙ｄ竴/鎺ュ彛浜岄兘鏌ヤ笉鍒版椂锛岀敤SN瑙勫垯鍒ゆ柇缂栫爜
-          <button id="sn-rule-add" style="float:right;font-size:12px;height:22px;">鏂板涓€琛?/button>
+          一、SN规则兜底：接口一/接口二都查不到时，用SN规则判断编码
+          <button id="sn-rule-add" style="float:right;font-size:12px;height:22px;">新增一行</button>
         </div>
 
         <div style="padding:8px;">
           <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span>娴嬭瘯SN锛?/span>
-            <input id="sn-rule-test-sn" placeholder="濡?K0154738" style="width:180px;height:24px;box-sizing:border-box;font-size:12px;">
-            <button id="sn-rule-test-btn" style="font-size:12px;height:24px;">娴嬭瘯SN瑙勫垯</button>
-            <span style="color:#666;">渚嬶細K??????? 琛ㄧずK寮€澶存€诲叡8浣嶏紱K179* 琛ㄧずK179寮€澶村悗闈换鎰忛暱搴?/span>
+            <span>测试SN：</span>
+            <input id="sn-rule-test-sn" placeholder="如 K0154738" style="width:180px;height:24px;box-sizing:border-box;font-size:12px;">
+            <button id="sn-rule-test-btn" style="font-size:12px;height:24px;">测试SN规则</button>
+            <span style="color:#666;">例：K??????? 表示K开头总共8位；K179* 表示K179开头后面任意长度</span>
           </div>
 
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
             <thead>
               <tr style="background:#fafafa;">
-                <th style="border:1px solid #eee;padding:5px;width:40px;">搴忓彿</th>
-                <th style="border:1px solid #eee;padding:5px;width:120px;">缂栫爜</th>
-                <th style="border:1px solid #eee;padding:5px;width:90px;">鍖归厤鏂瑰紡</th>
-                <th style="border:1px solid #eee;padding:5px;width:150px;">SN瑙勫垯</th>
-                <th style="border:1px solid #eee;padding:5px;">澶囨敞</th>
-                <th style="border:1px solid #eee;padding:5px;width:60px;">鎿嶄綔</th>
+                <th style="border:1px solid #eee;padding:5px;width:40px;">序号</th>
+                <th style="border:1px solid #eee;padding:5px;width:120px;">编码</th>
+                <th style="border:1px solid #eee;padding:5px;width:90px;">匹配方式</th>
+                <th style="border:1px solid #eee;padding:5px;width:150px;">SN规则</th>
+                <th style="border:1px solid #eee;padding:5px;">备注</th>
+                <th style="border:1px solid #eee;padding:5px;width:60px;">操作</th>
               </tr>
             </thead>
             <tbody id="sn-rule-tbody"></tbody>
           </table>
 
           <div style="margin-top:6px;color:#777;line-height:18px;">
-            鍖呭惈锛歋N閲屽寘鍚鍒欏唴瀹癸紱寮€澶存槸锛歋N浠ュ墠缂€寮€澶达紱绛変簬锛歋N瀹屽叏涓€鏍凤紱
-            閫氶厤锛? 琛ㄧず浠绘剰1浣嶏紝鏈熬鍗曚釜 * 琛ㄧず鍚庨潰浠绘剰闀垮害銆係N瑙勫垯閲屾湁 * 鎴?? 鏃讹紝浼氳嚜鍔ㄦ寜閫氶厤澶勭悊銆?            <br>娉ㄦ剰锛歋N瑙勫垯鍏滃簳涓嶅彈鎺ュ彛涓€鎺掗櫎缂栫爜褰卞搷銆?          </div>
+            包含：SN里包含规则内容；开头是：SN以前缀开头；等于：SN完全一样；
+            通配：? 表示任意1位，末尾单个 * 表示后面任意长度。SN规则里有 * 或 ? 时，会自动按通配处理。
+            <br>注意：SN规则兜底不受接口一排除编码影响。
+          </div>
         </div>
       </div>
 
       <div style="margin-bottom:14px;border:1px solid #ddd;border-radius:6px;overflow:hidden;">
         <div style="background:#fafafa;padding:7px 10px;font-weight:bold;">
-          浜屻€佹帴鍙ｄ竴寮哄瓧娈碉細杈撳叆SN鏌ヨ鎺ュ彛涓€锛岃繑鍥炲唴瀹归噷鍖呭惈鍥哄畾瀛楃锛屽氨寮哄埗绛変簬鎸囧畾缂栫爜
-          <button id="sn-strong-add" style="float:right;font-size:12px;height:22px;">鏂板涓€琛?/button>
+          二、接口一强字段：输入SN查询接口一，返回内容里包含固定字符，就强制等于指定编码
+          <button id="sn-strong-add" style="float:right;font-size:12px;height:22px;">新增一行</button>
         </div>
 
         <div style="padding:8px;">
           <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span>娴嬭瘯搴忓垪鍙稴N锛?/span>
-            <input id="sn-strong-test-text" placeholder="杈撳叆SN鍚庢煡璇㈡帴鍙ｄ竴" style="width:220px;height:24px;box-sizing:border-box;font-size:12px;">
-            <button id="sn-strong-test-btn" style="font-size:12px;height:24px;">鏌ヨ鎺ュ彛涓€骞舵祴璇?/button>
-            <span style="color:#666;">渚嬶細鎺ュ彛涓€杩斿洖鍐呭鍚?OC8072V1H74S锛屽垯缂栫爜 34090213</span>
+            <span>测试序列号SN：</span>
+            <input id="sn-strong-test-text" placeholder="输入SN后查询接口一" style="width:220px;height:24px;box-sizing:border-box;font-size:12px;">
+            <button id="sn-strong-test-btn" style="font-size:12px;height:24px;">查询接口一并测试</button>
+            <span style="color:#666;">例：接口一返回内容含 OC8072V1H74S，则编码 34090213</span>
           </div>
 
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
             <thead>
               <tr style="background:#fafafa;">
-                <th style="border:1px solid #eee;padding:5px;width:40px;">搴忓彿</th>
-                <th style="border:1px solid #eee;padding:5px;width:210px;">鍥哄畾瀛楃</th>
-                <th style="border:1px solid #eee;padding:5px;width:120px;">绛変簬缂栫爜</th>
-                <th style="border:1px solid #eee;padding:5px;">澶囨敞</th>
-                <th style="border:1px solid #eee;padding:5px;width:60px;">鎿嶄綔</th>
+                <th style="border:1px solid #eee;padding:5px;width:40px;">序号</th>
+                <th style="border:1px solid #eee;padding:5px;width:210px;">固定字符</th>
+                <th style="border:1px solid #eee;padding:5px;width:120px;">等于编码</th>
+                <th style="border:1px solid #eee;padding:5px;">备注</th>
+                <th style="border:1px solid #eee;padding:5px;width:60px;">操作</th>
               </tr>
             </thead>
             <tbody id="sn-strong-tbody"></tbody>
           </table>
 
           <div style="margin-top:6px;color:#777;line-height:18px;">
-            璇存槑锛氭帴鍙ｄ竴杩斿洖鏁版嵁閲屽彧瑕佸嚭鐜扳€滃浐瀹氬瓧绗︹€濓紝灏辨妸鈥滅瓑浜庣紪鐮佲€濇彃鍏ユ帴鍙ｄ竴缁撴灉鏈€鍓嶉潰锛屼紭鍏堢粰鏍￠獙鑴氭湰鍛戒腑銆?            <br>娉ㄦ剰锛氬己瀛楁灞炰簬鎺ュ彛涓€锛屾墍浠ュ彈鎺ュ彛涓€鎺掗櫎缂栫爜褰卞搷銆?          </div>
+            说明：接口一返回数据里只要出现“固定字符”，就把“等于编码”插入接口一结果最前面，优先给校验脚本命中。
+            <br>注意：强字段属于接口一，所以受接口一排除编码影响。
+          </div>
         </div>
       </div>
 
       <div style="margin-bottom:14px;border:1px solid #ddd;border-radius:6px;overflow:hidden;">
         <div style="background:#fafafa;padding:7px 10px;font-weight:bold;">
-          涓夈€佹帴鍙ｄ竴鎺掗櫎缂栫爜锛氳繖浜涚紪鐮佸湪鎺ュ彛涓€閲屼笉瑕佸懡涓?        </div>
+          三、接口一排除编码：这些编码在接口一里不要命中
+        </div>
 
         <div style="padding:8px;">
-          <textarea id="sn-exclude-text" placeholder="涓€琛屼竴涓紪鐮侊紝渚嬪锛?34090456
+          <textarea id="sn-exclude-text" placeholder="一行一个编码，例如：
+34090456
 34090000" style="
             width:100%;
             height:80px;
@@ -1353,16 +1369,21 @@ function showRuleModal() {
           "></textarea>
 
           <div style="margin-top:6px;color:#777;line-height:18px;">
-            璇存槑锛氭帓闄ょ紪鐮佸彧浣滅敤浜庢帴鍙ｄ竴锛屼笖蹇呴』瀹屽叏鐩哥瓑銆?            渚嬪濉啓 34090456锛屽彧鎺掗櫎鎺ュ彛涓€閲岀殑 34090456锛屼笉鎺掗櫎 34090456-001銆?            鎺ュ彛浜屽拰SN瑙勫垯鍏滃簳涓嶅彈杩欓噷褰卞搷銆?          </div>
+            说明：排除编码只作用于接口一，且必须完全相等。
+            例如填写 34090456，只排除接口一里的 34090456，不排除 34090456-001。
+            接口二和SN规则兜底不受这里影响。
+          </div>
         </div>
       </div>
 
       <div style="margin-bottom:14px;border:1px solid #ddd;border-radius:6px;overflow:hidden;">
         <div style="background:#fafafa;padding:7px 10px;font-weight:bold;">
-          鍥涖€佸乏渚ф潯鐮佹竻娲楋細鍙竻娲楅〉闈㈠乏渚ф潯鐮侊紝涓嶅奖鍝嶆帴鍙ｆ煡璇㈢紪鐮?        </div>
+          四、左侧条码清洗：只清洗页面左侧条码，不影响接口查询编码
+        </div>
 
         <div style="padding:8px;">
-          <textarea id="sn-left-clean-text" placeholder="涓€琛屼竴涓竻娲楄鍒欙紝渚嬪锛?SN
+          <textarea id="sn-left-clean-text" placeholder="一行一个清洗规则，例如：
+SN
 :
 -" style="
             width:100%;
@@ -1374,7 +1395,12 @@ function showRuleModal() {
           "></textarea>
 
           <div style="margin-top:6px;color:#777;line-height:18px;">
-            璇存槑锛?            <br>1銆佸～鍐?SN锛氬乏渚?SN03035FDT 浼氭竻娲楁垚 03035FDT銆?            <br>2銆佸～鍐?: 锛氬乏渚?U1:213409015510S4104636 浼氭竻娲楁垚 213409015510S4104636銆?            <br>3銆佸～鍐?- 锛氬乏渚?ABC-34090213 浼氭竻娲楁垚 34090213銆?            <br>4銆佽繖浜涜鍒欏彧浣滅敤浜庡乏渚ф潯鐮侊紝涓嶄細娓呮礂鎺ュ彛杩斿洖鐨勭紪鐮併€?          </div>
+            说明：
+            <br>1、填写 SN：左侧 SN03035FDT 会清洗成 03035FDT。
+            <br>2、填写 : ：左侧 U1:213409015510S4104636 会清洗成 213409015510S4104636。
+            <br>3、填写 - ：左侧 ABC-34090213 会清洗成 34090213。
+            <br>4、这些规则只作用于左侧条码，不会清洗接口返回的编码。
+          </div>
         </div>
       </div>
 
@@ -1391,7 +1417,7 @@ function showRuleModal() {
     enabled = this.checked;
     localStorage.setItem(ENABLE_KEY, enabled ? '1' : '0');
     updateMiniButton();
-    setRuleMsg(enabled ? '瑙勫垯鍏滃簳宸插惎鐢? : '瑙勫垯鍏滃簳宸插叧闂?, enabled ? '#389e0d' : '#d4380d');
+    setRuleMsg(enabled ? '规则兜底已启用' : '规则兜底已关闭', enabled ? '#389e0d' : '#d4380d');
   };
 
   document.getElementById('sn-rule-save').onclick = function () {
@@ -1399,7 +1425,7 @@ function showRuleModal() {
   };
 
   document.getElementById('sn-rule-clear').onclick = function () {
-    if (!confirm('纭畾娓呯┖鎵€鏈塖N瑙勫垯銆佸己瀛楁銆佹帴鍙ｄ竴鎺掗櫎缂栫爜鍜屽乏渚ф竻娲楄鍒欙紵')) return;
+    if (!confirm('确定清空所有SN规则、强字段、接口一排除编码和左侧清洗规则？')) return;
 
     saveRules([]);
     saveStrongFields([]);
@@ -1407,7 +1433,7 @@ function showRuleModal() {
     saveLeftCleanRules([]);
 
     renderRuleTable();
-    setRuleMsg('宸叉竻绌哄叏閮ㄨ鍒?, '#d4380d');
+    setRuleMsg('已清空全部规则', '#d4380d');
   };
 
   document.getElementById('sn-rule-add').onclick = function () {
@@ -1472,6 +1498,6 @@ function showRuleModal() {
     }
   };
 
-  console.log('[SN瑙勫垯鍏滃簳鍓嶅彴鐗圿 宸插畨瑁?v1.6');
+  console.log('[SN规则兜底前台版] 已安装 v1.6');
 
 })();
