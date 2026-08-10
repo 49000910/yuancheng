@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         MES BOM缂栫爜鎵嬪姩鎺掑簭锛堟暣琛屾帓搴?SN鎸夋帓搴忓悗璺宠浆-鍙渶灏忓寲锛?// @namespace    tm.mes.bom.sort.row.sn.enter.tab.min
+// @name         MES BOM编码手动排序（整行排序-SN按排序后跳转-可最小化）
+// @namespace    tm.mes.bom.sort.row.sn.enter.tab.min
 // @version      0.8.1
-// @description  BOM鏁磋鎺掑簭锛汼N妗嗘寜鎺掑簭鍚庨〉闈粠涓婂線涓嬭烦锛汿ab/Shift+Tab/鎵爜Enter鏀寔锛涗笉鏀筍N妗唅d锛涢潰鏉垮彲鏈€灏忓寲
+// @description  BOM整行排序；SN框按排序后页面从上往下跳；Tab/Shift+Tab/扫码Enter支持；不改SN框id；面板可最小化
 // @match        https://w3.huawei.com/mespmm/*
 // @grant        none
 // @run-at       document-idle
@@ -14,7 +15,8 @@
   const CELL_SELECTOR = 'td.grid-cell';
   const SN_INPUT_SELECTOR = 'input[id^="sn-input"]';
 
-  // 濡傛灉璇嗗埆閿欑紪鐮佸垪锛屽彲鏀规垚 0銆?銆?锛涗笉纭畾淇濇寔 null銆?  const CODE_COL_INDEX = null;
+  // 如果识别错编码列，可改成 0、1、2；不确定保持 null。
+  const CODE_COL_INDEX = null;
 
   const ENABLE_KEY = 'mes_bom_sort_panel_enable_v2';
   const ORDER_KEY = 'mes_bom_sort_panel_order_v2';
@@ -42,7 +44,7 @@
     localStorage.setItem(ENABLE_KEY, v ? '1' : '0');
     updatePanel();
     scheduleWork();
-    console.log('[BOM鎺掑簭] 寮€鍏筹細', v ? '寮€' : '鍏?);
+    console.log('[BOM排序] 开关：', v ? '开' : '关');
   }
 
   function isVisible(el) {
@@ -63,7 +65,7 @@
     if (!cell) return '';
 
     return toStr(cell.innerText || cell.textContent || '')
-      .replace(/^鈻瞈s*鈻糪s*/, '')
+      .replace(/^▲\s*▼\s*/, '')
       .replace(/\s+/g, ' ');
   }
 
@@ -195,7 +197,7 @@
   }
 
   /***********************
-   * SN 璺宠浆锛氭寜鎺掑簭鍚庣殑鏁磋椤哄簭
+   * SN 跳转：按排序后的整行顺序
    ***********************/
 
   function sortedSnInputs() {
@@ -238,7 +240,7 @@
 
     focusInput(inputs[0]);
 
-    console.log('[BOM鎺掑簭] 宸茶仛鐒︽帓搴忓悗绗竴涓猄N锛?, inputs[0].id || '');
+    console.log('[BOM排序] 已聚焦排序后第一个SN：', inputs[0].id || '');
 
     return true;
   }
@@ -264,13 +266,13 @@
     const next = getNextSnBySortedOrder(currentInput, step);
 
     if (!next) {
-      console.log('[BOM鎺掑簭] SN宸插埌澶达紝涓嶈烦銆傚綋鍓嶏細', currentInput ? currentInput.id : '');
+      console.log('[BOM排序] SN已到头，不跳。当前：', currentInput ? currentInput.id : '');
       return false;
     }
 
     focusInput(next);
 
-    console.log('[BOM鎺掑簭] SN璺宠浆锛?, currentInput.id || '', '=>', next.id || '');
+    console.log('[BOM排序] SN跳转：', currentInput.id || '', '=>', next.id || '');
 
     return true;
   }
@@ -308,13 +310,16 @@
 
       const input = e.target;
 
-      // 鎵爜 Enter锛氱┖鍊间笉澶勭悊銆?      if (isEnter && !toStr(input.value)) {
+      // 扫码 Enter：空值不处理。
+      if (isEnter && !toStr(input.value)) {
         return;
       }
 
-      // 鍏抽敭锛?      // Tab + Shift 鎵嶅線涓婏紱
-      // 鏅€?Tab 寰€涓嬶紱
-      // Enter/鎵爜 姘歌繙寰€涓嬶紝閬垮厤鎵爜鏃跺線涓婅烦銆?      const step = isTab && e.shiftKey ? -1 : 1;
+      // 关键：
+      // Tab + Shift 才往上；
+      // 普通 Tab 往下；
+      // Enter/扫码 永远往下，避免扫码时往上跳。
+      const step = isTab && e.shiftKey ? -1 : 1;
 
     const next = getNextSnBySortedOrder(input, step);
 
@@ -322,22 +327,26 @@ if (toStr(input.value)) {
   snStarted = true;
 }
 
-// 娌℃湁涓嬩竴涓?涓婁竴涓椂锛屽厑璁搁粯璁よ涓猴紙鍥炶溅鎻愪氦琛ㄥ崟锛?if (!next) {
-  // 鍙樆姝簨浠朵紶鎾紝涓嶉樆姝㈤粯璁よ涓?  e.stopPropagation();
+// 没有下一个/上一个时，允许默认行为（回车提交表单）
+if (!next) {
+  // 只阻止事件传播，不阻止默认行为
+  e.stopPropagation();
 
   if (e.stopImmediatePropagation) {
     e.stopImmediatePropagation();
   }
 
   console.log(
-    '[BOM鎺掑簭] SN宸插埌澶达紝鍏佽榛樿琛屼负銆傚綋鍓嶏細',
+    '[BOM排序] SN已到头，允许默认行为。当前：',
     input.id || '',
-    isEnter ? '鏉ユ簮锛欵nter/鎵爜' : '鏉ユ簮锛歍ab'
+    isEnter ? '来源：Enter/扫码' : '来源：Tab'
   );
 
-  return; // 涓嶉樆姝㈤粯璁よ涓猴紝璁╁洖杞﹀彲浠ユ彁浜よ〃鍗?}
+  return; // 不阻止默认行为，让回车可以提交表单
+}
 
-// 姝ｅ父璺宠浆鏃堕樆姝㈤粯璁よ涓?e.preventDefault();
+// 正常跳转时阻止默认行为
+e.preventDefault();
 e.stopPropagation();
 
 if (e.stopImmediatePropagation) {
@@ -348,26 +357,27 @@ focusInput(next);
 
 
       console.log(
-        '[BOM鎺掑簭] 鎹曡幏',
-        isEnter ? 'Enter/鎵爜' : (e.shiftKey ? 'Shift+Tab' : 'Tab'),
-        '鎸夋帓搴忓悗椤哄簭璺筹細',
+        '[BOM排序] 捕获',
+        isEnter ? 'Enter/扫码' : (e.shiftKey ? 'Shift+Tab' : 'Tab'),
+        '按排序后顺序跳：',
         input.id || '',
         '=>',
         next.id || ''
       );
     }
 
-    // window 鎹曡幏姣?document 鏇存棭锛岄伩鍏?MES 鍏堝鐞嗐€?    window.addEventListener('keydown', keyHandler, true);
+    // window 捕获比 document 更早，避免 MES 先处理。
+    window.addEventListener('keydown', keyHandler, true);
     document.addEventListener('keydown', keyHandler, true);
   }
 
   /***********************
-   * 淇濆瓨/搴旂敤鎺掑簭
+   * 保存/应用排序
    ***********************/
 
   function cleanSavedCode(code) {
     return toStr(code)
-      .replace(/^鈻瞈s*鈻糪s*/, '')
+      .replace(/^▲\s*▼\s*/, '')
       .replace(/\s+/g, ' ');
   }
 
@@ -404,7 +414,7 @@ focusInput(next);
         order: order
       }));
 
-      console.log('[BOM鎺掑簭] 宸蹭繚瀛橀『搴忥細');
+      console.log('[BOM排序] 已保存顺序：');
       console.table(order.map(function (code, index) {
         return {
           index: index + 1,
@@ -412,7 +422,7 @@ focusInput(next);
         };
       }));
     } catch (e) {
-      console.warn('[BOM鎺掑簭] 淇濆瓨澶辫触锛?, e);
+      console.warn('[BOM排序] 保存失败：', e);
     }
 
     syncSnTabIndex();
@@ -425,8 +435,8 @@ focusInput(next);
     localStorage.removeItem(ORDER_KEY);
     syncSnTabIndex();
     updatePanel();
-    toast('宸叉竻闄OM鎺掑簭');
-    console.log('[BOM鎺掑簭] 宸叉竻闄や繚瀛橀『搴?);
+    toast('已清除BOM排序');
+    console.log('[BOM排序] 已清除保存顺序');
   }
 
   function buildRank(order) {
@@ -458,7 +468,8 @@ focusInput(next);
       return;
     }
 
-    // 鑷姩妯″紡涓嬶紝鍙湪SN鏈紑濮?鍏ㄧ┖鏃惰嚜鍔ㄥ姩DOM銆?    if (!force && (snStarted || hasAnySnValue())) {
+    // 自动模式下，只在SN未开始/全空时自动动DOM。
+    if (!force && (snStarted || hasAnySnValue())) {
       syncSnTabIndex();
       return;
     }
@@ -531,7 +542,7 @@ focusInput(next);
           })
         );
 
-        console.log('[BOM鎺掑簭] 宸插簲鐢ㄤ繚瀛橀『搴忥細', items.map(function (x) {
+        console.log('[BOM排序] 已应用保存顺序：', items.map(function (x) {
           return x.code;
         }));
       });
@@ -543,7 +554,8 @@ focusInput(next);
 
     syncSnTabIndex();
 
-    // 濡傛灉SN閮戒负绌猴紝鎺掑簭瀹屾垚鍚庤嚜鍔ㄥ埌鎺掑簭鍚庣殑绗竴涓猄N銆?    if ((force || didChange) && !hasAnySnValue()) {
+    // 如果SN都为空，排序完成后自动到排序后的第一个SN。
+    if ((force || didChange) && !hasAnySnValue()) {
       focusFirstSnBySortedOrder();
     }
 
@@ -551,7 +563,8 @@ focusInput(next);
   }
 
   /***********************
-   * BOM琛屾嫋鍔?   ***********************/
+   * BOM行拖动
+   ***********************/
 
   function findTargetRowByY(parent, clientY) {
     const rows = rowsInParent(parent).filter(function (row) {
@@ -591,11 +604,13 @@ focusInput(next);
     if (movingRow) return;
     if (!isEnabled()) return;
 
-    // 蹇呴』鎸変綇 Alt 鎴?Ctrl锛岄伩鍏嶅奖鍝嶆櫘閫氭壂鐮?鐐瑰嚮銆?    if (!e.altKey && !e.ctrlKey) return;
+    // 必须按住 Alt 或 Ctrl，避免影响普通扫码/点击。
+    if (!e.altKey && !e.ctrlKey) return;
 
     if (e.button != null && e.button !== 0) return;
 
-    // 涓嶅厑璁镐粠SN妗嗛噷闈㈡嫋銆?    if (e.target && e.target.closest && e.target.closest(SN_INPUT_SELECTOR)) {
+    // 不允许从SN框里面拖。
+    if (e.target && e.target.closest && e.target.closest(SN_INPUT_SELECTOR)) {
       return;
     }
 
@@ -607,7 +622,7 @@ focusInput(next);
     e.preventDefault();
     e.stopPropagation();
 
-    console.log('[BOM鎺掑簭] 寮€濮嬫嫋鍔細', getRowCode(row));
+    console.log('[BOM排序] 开始拖动：', getRowCode(row));
   }
 
   function moveByY(clientY) {
@@ -676,10 +691,10 @@ focusInput(next);
         focusFirstSnBySortedOrder();
       }
 
-      toast('BOM椤哄簭宸蹭繚瀛?);
+      toast('BOM顺序已保存');
     }
 
-    console.log('[BOM鎺掑簭] 缁撴潫鎷栧姩锛屽凡淇濆瓨锛?, code);
+    console.log('[BOM排序] 结束拖动，已保存：', code);
 
     if (e) {
       e.preventDefault();
@@ -703,7 +718,7 @@ focusInput(next);
   }
 
   /***********************
-   * 椤甸潰瑙傚療
+   * 页面观察
    ***********************/
 
   function scheduleWork() {
@@ -721,7 +736,7 @@ focusInput(next);
 
         updatePanel();
       } catch (e) {
-        console.warn('[BOM鎺掑簭] 鎵ц寮傚父锛?, e);
+        console.warn('[BOM排序] 执行异常：', e);
       }
     }, 300);
   }
@@ -781,7 +796,7 @@ focusInput(next);
   }
 
   /***********************
-   * 闈㈡澘
+   * 面板
    ***********************/
 
   function loadPanelPos() {
@@ -825,17 +840,17 @@ focusInput(next);
 
     box.innerHTML =
       '<div class="bom-panel-head">' +
-        '<span class="bom-title">BOM鎺掑簭</span>' +
+        '<span class="bom-title">BOM排序</span>' +
         '<span class="bom-info"></span>' +
-        '<button type="button" data-act="min" title="鏈€灏忓寲/灞曞紑">鈥?/button>' +
+        '<button type="button" data-act="min" title="最小化/展开">—</button>' +
       '</div>' +
       '<div class="bom-body">' +
         '<button type="button" data-act="toggle"></button>' +
-        '<button type="button" data-act="save">淇濆瓨褰撳墠</button>' +
-        '<button type="button" data-act="apply">搴旂敤</button>' +
-        '<button type="button" data-act="first">棣栦釜SN</button>' +
-        '<button type="button" data-act="clear">娓呴櫎</button>' +
-        '<button type="button" data-act="print">鎵撳嵃</button>' +
+        '<button type="button" data-act="save">保存当前</button>' +
+        '<button type="button" data-act="apply">应用</button>' +
+        '<button type="button" data-act="first">首个SN</button>' +
+        '<button type="button" data-act="clear">清除</button>' +
+        '<button type="button" data-act="print">打印</button>' +
       '</div>';
 
     box.style.position = 'fixed';
@@ -867,7 +882,8 @@ focusInput(next);
     const head = box.querySelector('.bom-panel-head');
     const title = box.querySelector('.bom-title');
 head.addEventListener('click', function (e) {
-  // 鐐规渶灏忓寲鎸夐挳鏃讹紝涓嶆墽琛岃繖閲?  if (e.target && e.target.closest && e.target.closest('button')) return;
+  // 点最小化按钮时，不执行这里
+  if (e.target && e.target.closest && e.target.closest('button')) return;
 
   if (!isPanelMinimized()) return;
 
@@ -913,9 +929,9 @@ head.addEventListener('click', function (e) {
             focusFirstSnBySortedOrder();
           }
 
-          toast('BOM椤哄簭宸蹭繚瀛?);
+          toast('BOM顺序已保存');
         } else {
-          toast('鏈壘鍒癇OM琛?);
+          toast('未找到BOM行');
         }
       } else if (act === 'apply') {
         applySavedOrder(true);
@@ -935,7 +951,8 @@ head.addEventListener('click', function (e) {
     let panelStartTop = 0;
 
     head.addEventListener('mousedown', function (e) {
-      // 鐐规渶灏忓寲鎸夐挳鏃朵笉瑕佹嫋鍔?      if (e.target && e.target.closest && e.target.closest('button')) return;
+      // 点最小化按钮时不要拖动
+      if (e.target && e.target.closest && e.target.closest('button')) return;
 
       draggingPanel = true;
 
@@ -1008,7 +1025,7 @@ function updatePanel() {
   const minimized = isPanelMinimized();
 
   if (minimized) {
-    // 鏈€灏忓寲锛氬彧鏄剧ず涓€涓?BOM 灏忓潡
+    // 最小化：只显示一个 BOM 小块
     box.style.minWidth = 'auto';
     box.style.padding = '5px 9px';
     box.style.borderRadius = '8px';
@@ -1042,7 +1059,8 @@ function updatePanel() {
     return;
   }
 
-  // 灞曞紑鐘舵€?  box.style.minWidth = '280px';
+  // 展开状态
+  box.style.minWidth = '280px';
   box.style.padding = '6px 8px';
   box.style.borderRadius = '8px';
   box.style.cursor = 'default';
@@ -1054,7 +1072,7 @@ function updatePanel() {
   }
 
   if (title) {
-    title.textContent = 'BOM鎺掑簭';
+    title.textContent = 'BOM排序';
     title.style.fontWeight = '700';
     title.style.marginRight = '0';
   }
@@ -1065,19 +1083,19 @@ function updatePanel() {
 
   if (minBtn) {
     minBtn.style.display = '';
-    minBtn.textContent = '鈥?;
+    minBtn.textContent = '—';
     minBtn.style.marginLeft = 'auto';
   }
 
   if (toggleBtn) {
-    toggleBtn.textContent = enabled ? '寮€' : '鍏?;
+    toggleBtn.textContent = enabled ? '开' : '关';
     toggleBtn.style.background = enabled ? '#52c41a' : '#999';
     toggleBtn.style.color = '#fff';
   }
 
   if (info) {
     info.style.display = '';
-    info.textContent = '琛? + rows.length + ' / 宸插瓨' + order.length;
+    info.textContent = '行' + rows.length + ' / 已存' + order.length;
     info.style.color = '#ddd';
     info.style.flex = '1';
   }
@@ -1119,17 +1137,17 @@ function updatePanel() {
     const rows = allBomRows();
     const inputs = sortedSnInputs();
 
-    console.group('[BOM鎺掑簭] 褰撳墠璇嗗埆缁撴灉');
+    console.group('[BOM排序] 当前识别结果');
     console.log('href =', location.href);
-    console.log('grid-row鎬绘暟 =', document.querySelectorAll(ROW_SELECTOR).length);
-    console.log('sn-input鎬绘暟 =', document.querySelectorAll(SN_INPUT_SELECTOR).length);
-    console.log('鍙帓搴忚鏁?=', rows.length);
-    console.log('鎺掑簭鍚嶴N椤哄簭 =', inputs.map(function (x) { return x.id; }));
-    console.log('寮€鍏?=', isEnabled() ? '寮€' : '鍏?);
-    console.log('宸蹭繚瀛橀『搴?=', loadOrder());
-    console.log('浠绘剰SN宸叉湁鍊?=', hasAnySnValue());
+    console.log('grid-row总数 =', document.querySelectorAll(ROW_SELECTOR).length);
+    console.log('sn-input总数 =', document.querySelectorAll(SN_INPUT_SELECTOR).length);
+    console.log('可排序行数 =', rows.length);
+    console.log('排序后SN顺序 =', inputs.map(function (x) { return x.id; }));
+    console.log('开关 =', isEnabled() ? '开' : '关');
+    console.log('已保存顺序 =', loadOrder());
+    console.log('任意SN已有值 =', hasAnySnValue());
     console.log('snStarted =', snStarted);
-    console.log('闈㈡澘鏈€灏忓寲 =', isPanelMinimized());
+    console.log('面板最小化 =', isPanelMinimized());
 
     console.table(rows.map(function (row, index) {
       const cell = getCodeCell(row);
@@ -1152,7 +1170,8 @@ function updatePanel() {
   }
 
   /***********************
-   * 鍒濆鍖?   ***********************/
+   * 初始化
+   ***********************/
 
   function init() {
     if (inited) return;
@@ -1231,19 +1250,19 @@ function updatePanel() {
 
     setTimeout(printDebug, 1000);
 
-    console.log('[BOM鎺掑簭] 宸插惎鍔?);
-    console.log('[BOM鎺掑簭] 鏁磋鎺掑簭锛氱紪鐮佸拰SN妗嗕竴璧风Щ鍔紝涓嶆敼SN妗唅d');
-    console.log('[BOM鎺掑簭] 鎷栧姩BOM琛岋細鎸変綇 Alt 鎴?Ctrl + 榧犳爣宸﹂敭鎷栧姩BOM琛?);
-    console.log('[BOM鎺掑簭] SN璺宠浆锛歍ab涓嬩竴涓紝Shift+Tab涓婁竴涓紝鎵爜Enter褰撲笅涓€涓?);
-    console.log('[BOM鎺掑簭] 闈㈡澘锛氱偣 鈥?鏈€灏忓寲锛岀偣 鈻?灞曞紑');
-    console.log('[BOM鎺掑簭] 鎺у埗鍙板懡浠わ細BomSortPanel.print() / save() / apply() / clear() / first() / next() / prev() / min() / max()');
+    console.log('[BOM排序] 已启动');
+    console.log('[BOM排序] 整行排序：编码和SN框一起移动，不改SN框id');
+    console.log('[BOM排序] 拖动BOM行：按住 Alt 或 Ctrl + 鼠标左键拖动BOM行');
+    console.log('[BOM排序] SN跳转：Tab下一个，Shift+Tab上一个，扫码Enter当下一个');
+    console.log('[BOM排序] 面板：点 — 最小化，点 □ 展开');
+    console.log('[BOM排序] 控制台命令：BomSortPanel.print() / save() / apply() / clear() / first() / next() / prev() / min() / max()');
   }
 
   function waitProductTrackPage() {
     const href = location.href;
 
     if (href.includes('/wipweb') && href.includes('ProductTrackInOut')) {
-      console.log('[BOM鎺掑簭] 宸茶繘鍏?ProductTrackInOut锛屽噯澶囧惎鍔?);
+      console.log('[BOM排序] 已进入 ProductTrackInOut，准备启动');
       setTimeout(init, 800);
       return;
     }
@@ -1255,7 +1274,7 @@ function updatePanel() {
 
   window.addEventListener('hashchange', function () {
     if (location.href.includes('ProductTrackInOut')) {
-      console.log('[BOM鎺掑簭] hash鍙樺寲锛屽皾璇曞惎鍔?);
+      console.log('[BOM排序] hash变化，尝试启动');
       setTimeout(init, 800);
     }
   });
