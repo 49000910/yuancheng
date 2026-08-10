@@ -1,5 +1,6 @@
 // ==UserScript==
-// @name         鑷姩杩囩珯鍙屾ā寮忔帶鍒堕潰鏉匡紙SN闂ㄧ / 娴嬭瘯璁板綍锛?// @namespace    tm.auto.pass.dual.panel
+// @name         自动过站双模式控制面板（SN门禁 / 测试记录）
+// @namespace    tm.auto.pass.dual.panel
 // @version      1.0.1
 // @match        https://w3.huawei.com/mespmm/wipweb*
 // @grant        GM_xmlhttpRequest
@@ -10,11 +11,11 @@
   'use strict';
   if (!location.href.includes('#/ProductTrackInOut')) return;
 
-  // ===== 寮€鍏?=====
-  const KEY_SN_GUARD_ON = 'sn_guard_auto_pass_on';   // SN闂ㄧ杩囩珯
-  const KEY_HUMEP_ON = 'sn_humep_auto_pass_on';      // 娴嬭瘯璁板綍杩囩珯
+  // ===== 开关 =====
+  const KEY_SN_GUARD_ON = 'sn_guard_auto_pass_on';   // SN门禁过站
+  const KEY_HUMEP_ON = 'sn_humep_auto_pass_on';      // 测试记录过站
   const KEY_MODE = 'sn_dual_pass_mode';              // OR / AND
-  const KEY_POS = 'sn_dual_pass_panel_pos';          // 闈㈡澘浣嶇疆
+  const KEY_POS = 'sn_dual_pass_panel_pos';          // 面板位置
 
   if (localStorage.getItem(KEY_SN_GUARD_ON) == null) localStorage.setItem(KEY_SN_GUARD_ON, '0');
   if (localStorage.getItem(KEY_HUMEP_ON) == null) localStorage.setItem(KEY_HUMEP_ON, '0');
@@ -33,7 +34,7 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
 
   function norm(v){
     v = toStr(v).replace(/\s+/g, '');
-    if (v.indexOf('锛?) >= 0) v = v.split('锛?).pop();
+    if (v.indexOf('：') >= 0) v = v.split('：').pop();
     if (v.indexOf(':') >= 0) v = v.split(':').pop();
     return v.toUpperCase();
   }
@@ -47,7 +48,7 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     for (var i = 0; i < list.length; i++) {
       var txt = (list[i].innerText || '').replace(/\s+/g, '');
       var hasSaveIcon = !!list[i].querySelector('.hae-icon.icon-save');
-      if (txt === '杩囩珯' || (txt.indexOf('杩囩珯') >= 0 && hasSaveIcon)) return list[i];
+      if (txt === '过站' || (txt.indexOf('过站') >= 0 && hasSaveIcon)) return list[i];
     }
     return null;
   }
@@ -57,7 +58,7 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     for (var i = 0; i < all.length; i++) {
       var box = all[i].closest('div[id^="Input_"]');
       var ctx = ((box && box.parentElement ? box.parentElement.innerText : '') || '').replace(/\s+/g, '');
-      if (ctx.indexOf('鏉＄爜閲囬泦') >= 0) return all[i];
+      if (ctx.indexOf('条码采集') >= 0) return all[i];
     }
     return all[0] || null;
   }
@@ -81,7 +82,8 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     return true;
   }
 
-  // 鑻ヤ綘鐨凷N鑴氭湰鎻愪緵浜嗘洿涓ユ牸鍑芥暟锛屼紭鍏堢敤瀹?  function snPass() {
+  // 若你的SN脚本提供了更严格函数，优先用它
+  function snPass() {
     try {
       if (typeof window.__snCanAutoPass === 'function') return !!window.__snCanAutoPass();
       if (typeof unsafeWindow !== 'undefined' && typeof unsafeWindow.__snCanAutoPass === 'function') return !!unsafeWindow.__snCanAutoPass();
@@ -110,7 +112,7 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
   }
 
   function humepHitRule(row){
-    return String((row && row.tracedesc) || '').indexOf('鎴愬姛') >= 0 ||
+    return String((row && row.tracedesc) || '').indexOf('成功') >= 0 ||
            Number(row && row.result) === 0;
   }
 
@@ -124,10 +126,10 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
         timeout: 20000,
         onload: function (res) {
           try { resolve(JSON.parse(res.responseText)); }
-          catch (e) { reject(new Error('JSON瑙ｆ瀽澶辫触')); }
+          catch (e) { reject(new Error('JSON解析失败')); }
         },
         onerror: function (e) { reject(e); },
-        ontimeout: function () { reject(new Error('璇锋眰瓒呮椂')); }
+        ontimeout: function () { reject(new Error('请求超时')); }
       });
     });
   }
@@ -136,7 +138,8 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     var sn = currentBarcode();
     if (!sn) { lastHumepHit = null; return false; }
 
-    // 鍚孲N鐢ㄧ紦瀛?    if (sn === lastSn && lastHumepHit != null) return lastHumepHit;
+    // 同SN用缓存
+    if (sn === lastSn && lastHumepHit != null) return lastHumepHit;
 
     var j = await gmPost(HUMEP_URL, buildHumepBody(sn));
     var list = (j && j.result && Array.isArray(j.result.data)) ? j.result.data : [];
@@ -168,13 +171,13 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
       var md = mode();
 
       if (!onSn && !onHm) {
-        setStatus('寰呭懡锛堜袱涓紑鍏抽兘鍏抽棴锛?, '#666');
+        setStatus('待命（两个开关都关闭）', '#666');
         return;
       }
 
       var passBtn = getPassBtn();
       if (!passBtn) {
-        setStatus('鏈壘鍒拌繃绔欐寜閽?, '#cf1322');
+        setStatus('未找到过站按钮', '#cf1322');
         return;
       }
 
@@ -192,24 +195,24 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
 
       if (!allow) {
         var detail = [];
-        if (onSn) detail.push('SN=' + (snOk ? '閫氳繃' : '鏈€氳繃'));
-        if (onHm) detail.push('娴嬭瘯璁板綍=' + (hmOk ? '鍛戒腑' : '鏈懡涓?));
-        setStatus('鏈弧瓒宠繃绔欐潯浠讹細' + detail.join(' / '), '#fa8c16');
+        if (onSn) detail.push('SN=' + (snOk ? '通过' : '未通过'));
+        if (onHm) detail.push('测试记录=' + (hmOk ? '命中' : '未命中'));
+        setStatus('未满足过站条件：' + detail.join(' / '), '#fa8c16');
         return;
       }
 
       if (!canClick()) return;
       passBtn.click();
       markClick();
-      setStatus('宸茶嚜鍔ㄨ繃绔欙紙' + (onSn && onHm ? md : (onSn ? 'SN' : '娴嬭瘯璁板綍')) + '锛?, '#389e0d');
+      setStatus('已自动过站（' + (onSn && onHm ? md : (onSn ? 'SN' : '测试记录')) + '）', '#389e0d');
     } catch (e) {
-      setStatus('寮傚父锛? + (e && e.message ? e.message : e), '#cf1322');
+      setStatus('异常：' + (e && e.message ? e.message : e), '#cf1322');
     } finally {
       busy = false;
     }
   }
 
-  // ===== 鎺у埗闈㈡澘 =====
+  // ===== 控制面板 =====
   function buildPanel() {
     if (document.getElementById('sn-dual-pass-panel')) return;
 
@@ -218,14 +221,14 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     p.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:999999;background:#fff;border:1px solid #d9d9d9;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.15);font-size:12px;padding:10px;width:300px;';
     p.innerHTML =
       '<div id="sn-dual-head" style="font-weight:600;cursor:move;display:flex;justify-content:space-between;align-items:center;">' +
-      '<span>鑷姩杩囩珯鍙屾ā寮?/span><button id="sn-dual-mini" style="border:0;background:#f0f0f0;border-radius:6px;padding:2px 8px;cursor:pointer;">鏈€灏忓寲</button></div>' +
+      '<span>自动过站双模式</span><button id="sn-dual-mini" style="border:0;background:#f0f0f0;border-radius:6px;padding:2px 8px;cursor:pointer;">最小化</button></div>' +
       '<div id="sn-dual-body" style="margin-top:8px;">' +
-      '<label style="display:block;margin-bottom:6px;"><input id="sn-dual-sn" type="checkbox"> SN鏍￠獙杩囩珯</label>' +
-      '<label style="display:block;margin-bottom:6px;"><input id="sn-dual-hm" type="checkbox"> 娴嬭瘯璁板綍杩囩珯</label>' +
-      '<div style="margin:6px 0;">缁勫悎妯″紡锛? +
+      '<label style="display:block;margin-bottom:6px;"><input id="sn-dual-sn" type="checkbox"> SN校验过站</label>' +
+      '<label style="display:block;margin-bottom:6px;"><input id="sn-dual-hm" type="checkbox"> 测试记录过站</label>' +
+      '<div style="margin:6px 0;">组合模式：' +
       '<label><input name="sn-dual-mode" type="radio" value="OR"> OR</label> ' +
       '<label><input name="sn-dual-mode" type="radio" value="AND"> AND</label></div>' +
-      '<div id="sn-dual-pass-status" style="color:#666;">寰呭懡</div>' +
+      '<div id="sn-dual-pass-status" style="color:#666;">待命</div>' +
       '</div>';
 
     document.body.appendChild(p);
@@ -258,10 +261,10 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
     mini.addEventListener('click', function () {
       collapsed = !collapsed;
       body.style.display = collapsed ? 'none' : '';
-      mini.textContent = collapsed ? '灞曞紑' : '鏈€灏忓寲';
+      mini.textContent = collapsed ? '展开' : '最小化';
     });
 
-    // 鎷栨嫿
+    // 拖拽
     (function drag(panel, head) {
       var down = false, sx = 0, sy = 0, ox = 0, oy = 0;
       head.addEventListener('mousedown', function (e) {
@@ -288,7 +291,7 @@ function toStr(v){ return v == null ? '' : String(v).trim(); }
       });
     })(p, p.querySelector('#sn-dual-head'));
 
-    // 鎭㈠浣嶇疆
+    // 恢复位置
     try {
       var pos = JSON.parse(localStorage.getItem(KEY_POS) || '{}');
       if (typeof pos.left === 'number' && typeof pos.top === 'number') {
