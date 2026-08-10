@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         鑷缓椤甸潰-閲囬泦瀵煎嚭-绛旀瀵煎叆-鎵归噺鐐归€?璺宠繃瀛樼枒鐗?// @namespace    http://tampermonkey.net/
+// @name         自建页面-采集导出-答案导入-批量点选-跳过存疑版
+// @namespace    http://tampermonkey.net/
 // @version      1.1.9
-// @description  閲囬泦瀵煎嚭锛屾敮鎸乀XT绛旀瀵煎叆銆侀珮浜綋鍓嶉绛旀銆佹壒閲忕偣閫夛紱瀛樼枒/鐣欑┖棰樺彧璺宠繃锛屼笉鐐瑰嚮瀛樼枒
+// @description  采集导出，支持TXT答案导入、高亮当前题答案、批量点选；存疑/留空题只跳过，不点击存疑
 // @match        http://*/*
 // @match        https://*/*
 // @match        file:///*
@@ -14,20 +15,21 @@
 
   console.log('[AE] userscript loaded:', location.href, document.readyState);
 
-  // ===== 閫夋嫨鍣ㄩ厤缃?=====
+  // ===== 选择器配置 =====
   var CFG = {
     questionRoot: '.right-subjects-inner .right-main',
     questionNo: '.subtitle .subtitle_index',
     stem: '.subtitle .main-title .markdown-body p',
 
-    // 鍏煎 subect-label 鍜?subject-label
+    // 兼容 subect-label 和 subject-label
     option: '.subect-label .option-list-item .option-content .markdown-body p, .subject-label .option-list-item .option-content .markdown-body p',
 
-    // 閫夐」澶栧眰锛岀敤浜庨珮浜?鐐归€?    optionItem: '.subect-label .option-list-item, .subject-label .option-list-item',
+    // 选项外层，用于高亮/点选
+    optionItem: '.subect-label .option-list-item, .subject-label .option-list-item',
 
     answer: '',
 
-    // 涓嬩竴棰橈細鎺掗櫎涓婁竴棰?prv锛屾帓闄ゅ瓨鐤?quest
+    // 下一题：排除上一题 prv，排除存疑 quest
     nextBtn: '.subject-btns .subject-btn:not(.prv):not(.quest)',
 
     stepDelay: 900,
@@ -84,20 +86,20 @@
 
   function stripTailNoise(s) {
     return String(s || '')
-      .replace(/\s*(涓婁竴棰榺涓嬩竴棰榺瀛樼枒|鍙栨秷瀛樼枒|鏀惰棌|鏍囪|浜ゅ嵎|鎻愪氦|鏌ョ湅瑙ｆ瀽)\s*$/g, '')
+      .replace(/\s*(上一题|下一题|存疑|取消存疑|收藏|标记|交卷|提交|查看解析)\s*$/g, '')
       .trim();
   }
 
   function cleanOptionText(s) {
     return stripTailNoise(String(s || ''))
-      .replace(/^([A-F])[\.銆乗s]*/i, '')
+      .replace(/^([A-F])[\.、\s]*/i, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   function compactText(s) {
     return cleanOptionText(s)
-      .replace(/[銆傦紟.銆乗s]/g, '')
+      .replace(/[。．.、\s]/g, '')
       .toLowerCase();
   }
 
@@ -140,29 +142,29 @@
     return 'STEM_' + normText(stem).slice(0, 120);
   }
 
-  // ===== 鏂囨湰鍏滃簳瑙ｆ瀽 =====
+  // ===== 文本兜底解析 =====
   function parseMergedBlockText(s) {
     s = normText(s);
 
     var stem = s;
-    var m1 = s.match(/^(.*?)(A[\.銆乗s]|B[\.銆乗s]|姝ｇ‘|閿欒)/);
+    var m1 = s.match(/^(.*?)(A[\.、\s]|B[\.、\s]|正确|错误)/);
 
     if (m1) {
       stem = m1[1].trim();
     }
 
-    stem = stem.replace(/^\d+[銆乗.\s]*/, '').trim();
+    stem = stem.replace(/^\d+[、\.\s]*/, '').trim();
 
     var options = [];
-    var abcd = s.match(/([A-F][\.銆乗s].*)$/);
+    var abcd = s.match(/([A-F][\.、\s].*)$/);
 
     if (abcd) {
-      var parts = abcd[1].split(/(?=[A-F][\.銆乗s])/).filter(function (x) {
+      var parts = abcd[1].split(/(?=[A-F][\.、\s])/).filter(function (x) {
         return !!x;
       });
 
       options = parts.map(function (p, i) {
-        var mm = p.match(/^([A-F])[\.銆乗s]*(.*)$/);
+        var mm = p.match(/^([A-F])[\.、\s]*(.*)$/);
 
         return {
           key: mm ? mm[1] : String.fromCharCode(65 + i),
@@ -170,16 +172,16 @@
         };
       });
     } else {
-      var ci = s.indexOf('姝ｇ‘');
-      var wi = s.indexOf('閿欒');
+      var ci = s.indexOf('正确');
+      var wi = s.indexOf('错误');
 
       if (ci >= 0 && wi >= 0) {
         if (ci < wi) {
-          options.push({ key: 'A', text: '姝ｇ‘' });
-          options.push({ key: 'B', text: '閿欒' });
+          options.push({ key: 'A', text: '正确' });
+          options.push({ key: 'B', text: '错误' });
         } else {
-          options.push({ key: 'A', text: '閿欒' });
-          options.push({ key: 'B', text: '姝ｇ‘' });
+          options.push({ key: 'A', text: '错误' });
+          options.push({ key: 'B', text: '正确' });
         }
       }
     }
@@ -190,7 +192,7 @@
     };
   }
 
-  // ===== 閫夋嫨鍣ㄦ彁鍙?=====
+  // ===== 选择器提取 =====
   function getCurrentBySelector() {
     var root = q(CFG.questionRoot);
 
@@ -226,7 +228,7 @@
     };
   }
 
-  // ===== 鍏滃簳鏂囨湰鎻愬彇 =====
+  // ===== 兜底文本提取 =====
   function getCurrentByFallback() {
     var root = q(CFG.questionRoot);
 
@@ -361,7 +363,7 @@
     ) || el;
   }
 
-  // 鍙壂鎻忛€夐」鍖哄煙锛屼笉鎵弿棰樺共 p/span/div锛岄伩鍏嶉骞插惈鍏抽敭璇嶉€夐敊
+  // 只扫描选项区域，不扫描题干 p/span/div，避免题干含关键词选错
   function findOptionElementByText(root, opt, idx, items, cur) {
     var target = compactText(opt && opt.text);
     var optionCount = ((cur && cur.options) || []).length;
@@ -513,7 +515,7 @@
 
   function isSkipAnswer(ans) {
     ans = String(ans || '').trim();
-    return !ans || /^(瀛樼枒|鐣欑┖|绌簗skip|璺宠繃|鏃爘鏃犵瓟妗坾娌℃湁绛旀|鏆傛棤绛旀)$/i.test(ans);
+    return !ans || /^(存疑|留空|空|skip|跳过|无|无答案|没有答案|暂无答案)$/i.test(ans);
   }
 
   function addAnswerToBank(row) {
@@ -553,7 +555,7 @@
     return true;
   }
 
-  // ===== 瀵煎叆 TXT / JSON 绛旀 =====
+  // ===== 导入 TXT / JSON 答案 =====
   function parseAnswerImport(content) {
     var count = 0;
 
@@ -563,7 +565,8 @@
       return 0;
     }
 
-    // 姣忔瀵煎叆娓呯┖鏃х瓟妗堝拰鏃ц烦杩?    state.answerBank = {};
+    // 每次导入清空旧答案和旧跳过
+    state.answerBank = {};
     state.skipBank = {};
 
     // JSON
@@ -615,7 +618,7 @@
         return count;
       }
     } catch (e) {
-      // 闈?JSON锛岀户缁寜 TXT 瑙ｆ瀽
+      // 非 JSON，继续按 TXT 解析
     }
 
     // TXT / CSV
@@ -626,8 +629,9 @@
         return;
       }
 
-      // 鏀寔绛旀锛?      // 1 A / 1.A / 1锛欰 / 3B / 11 ABCD / 21 姝ｇ‘ / 22 閿欒
-      var mAns = line.match(/^(\d+)\s*(?:[\.\銆乗:锛?锛宂)?\s*([A-F]+|姝ｇ‘|閿欒|瀵箌閿檤true|false|鏄瘄鍚?\s*$/i);
+      // 支持答案：
+      // 1 A / 1.A / 1：A / 3B / 11 ABCD / 21 正确 / 22 错误
+      var mAns = line.match(/^(\d+)\s*(?:[\.\、\:：,，])?\s*([A-F]+|正确|错误|对|错|true|false|是|否)\s*$/i);
 
       if (mAns) {
         var noAns = Number(mAns[1]);
@@ -639,8 +643,9 @@
         return;
       }
 
-      // 鏀寔璺宠繃锛?      // 2 / 2. / 2锛?/ 2 瀛樼枒 / 2 鐣欑┖ / 2 绌?/ 2 璺宠繃
-      var mSkip = line.match(/^(\d+)\s*(?:[\.\銆乗:锛?锛宂)?\s*(?:瀛樼枒|鐣欑┖|绌簗skip|璺宠繃|鏃爘鏃犵瓟妗坾娌℃湁绛旀|鏆傛棤绛旀)?\s*$/i);
+      // 支持跳过：
+      // 2 / 2. / 2： / 2 存疑 / 2 留空 / 2 空 / 2 跳过
+      var mSkip = line.match(/^(\d+)\s*(?:[\.\、\:：,，])?\s*(?:存疑|留空|空|skip|跳过|无|无答案|没有答案|暂无答案)?\s*$/i);
 
       if (mSkip) {
         var noSkip = Number(mSkip[1]);
@@ -690,11 +695,11 @@
         var n = parseAnswerImport(reader.result);
         var filled = refillCollectedAnswers();
 
-        toast('瀵煎叆绛旀/璺宠繃 ' + n + ' 鏉★紝鍥炲～ ' + filled + ' 鏉?);
+        toast('导入答案/跳过 ' + n + ' 条，回填 ' + filled + ' 条');
 
         setStatus(
-          '绛旀搴擄細' + Object.keys(state.answerBank).length +
-          ' 鏉★紝璺宠繃锛? + Object.keys(state.skipBank).length + ' 棰?
+          '答案库：' + Object.keys(state.answerBank).length +
+          ' 条，跳过：' + Object.keys(state.skipBank).length + ' 题'
         );
 
         console.log('[AE] answerBank:', state.answerBank);
@@ -743,7 +748,7 @@
       return [];
     }
 
-    var compact = raw.replace(/[\s,锛屻€亅\/]+/g, '').toUpperCase();
+    var compact = raw.replace(/[\s,，、|\/]+/g, '').toUpperCase();
 
     if (/^[A-F]+$/.test(compact)) {
       var out = [];
@@ -757,9 +762,9 @@
       return out;
     }
 
-    var clean = raw.replace(/[銆傦紟.銆乗s]/g, '').toLowerCase();
-    var isTrue = /^(姝ｇ‘|瀵箌true|鏄?$/i.test(clean);
-    var isFalse = /^(閿欒|閿檤false|鍚?$/i.test(clean);
+    var clean = raw.replace(/[。．.、\s]/g, '').toLowerCase();
+    var isTrue = /^(正确|对|true|是)$/i.test(clean);
+    var isFalse = /^(错误|错|false|否)$/i.test(clean);
 
     var letters = [];
 
@@ -767,16 +772,16 @@
       var t = String(o.text || '');
 
       var optClean = t
-        .replace(/^([A-F])[\.銆乗s]*/i, '')
-        .replace(/[銆傦紟.銆乗s]/g, '')
+        .replace(/^([A-F])[\.、\s]*/i, '')
+        .replace(/[。．.、\s]/g, '')
         .toLowerCase();
 
-      if (isTrue && /^(姝ｇ‘|瀵箌true|鏄?$/i.test(optClean)) {
+      if (isTrue && /^(正确|对|true|是)$/i.test(optClean)) {
         letters.push(o.key);
         return;
       }
 
-      if (isFalse && /^(閿欒|閿檤false|鍚?$/i.test(optClean)) {
+      if (isFalse && /^(错误|错|false|否)$/i.test(optClean)) {
         letters.push(o.key);
         return;
       }
@@ -826,7 +831,7 @@
     if (!root) {
       return {
         ok: false,
-        reason: '鏈壘鍒伴鐩尯鍩?
+        reason: '未找到题目区域'
       };
     }
 
@@ -880,12 +885,12 @@
     };
   }
 
-  // ===== 鏍囪/鐐归€夊綋鍓嶉 =====
+  // ===== 标记/点选当前题 =====
   function markOrSelectImportedAnswer() {
     var cur = getCurrentQuestion();
 
     if (!cur) {
-      toast('鏈瘑鍒綋鍓嶉鐩?, true);
+      toast('未识别当前题目', true);
       return;
     }
 
@@ -893,12 +898,12 @@
 
     if (!ans) {
       if (isImportedSkip(cur)) {
-        toast('褰撳墠棰樹负瀛樼枒/鐣欑┖锛屽凡璺宠繃锛屼笉鐐归€?);
+        toast('当前题为存疑/留空，已跳过，不点选');
         console.log('[AE] skip current:', cur);
         return;
       }
 
-      toast('绛旀搴撴病鏈夊尮閰嶅埌褰撳墠棰?, true);
+      toast('答案库没有匹配到当前题', true);
       console.log('[AE] no answer matched:', cur, state.answerBank, state.skipBank);
       return;
     }
@@ -906,7 +911,7 @@
     var letters = answerToLetters(ans, cur);
 
  if (!letters.length) {
-  toast('鍖归厤鍒扮瓟妗堬紝浣嗘棤娉曡浆鎴愰€夐」锛? + ans, true);
+  toast('匹配到答案，但无法转成选项：' + ans, true);
   console.log('[AE] cannot convert answer:', ans, cur);
   return;
 }
@@ -915,12 +920,12 @@
     var ret = applyAnswerToPage(cur, letters, ANSWER_IMPORT.autoSelect);
 
     if (!ret.ok) {
-      toast('澶勭悊澶辫触锛岀己灏戦€夐」锛? + ret.missing.join(','), true);
+      toast('处理失败，缺少选项：' + ret.missing.join(','), true);
       console.warn('[AE] apply failed:', ret, cur);
       return;
     }
 
-    toast((ANSWER_IMPORT.autoSelect ? '宸茬偣閫夌瓟妗堬細' : '宸叉爣璁扮瓟妗堬細') + letters.join(''));
+    toast((ANSWER_IMPORT.autoSelect ? '已点选答案：' : '已标记答案：') + letters.join(''));
 
     console.log('[AE] current answer:', {
       current: cur,
@@ -951,10 +956,10 @@
     return true;
   }
 
-  // ===== 鎵归噺鐐归€夊綋鍓嶉鍒版渶鍚庝竴棰?=====
+  // ===== 批量点选当前题到最后一题 =====
   async function batchSelectAllImportedAnswers() {
     if (state.running) {
-      toast('姝ｅ湪鎵ц涓紝璇峰嬁閲嶅鐐瑰嚮', true);
+      toast('正在执行中，请勿重复点击', true);
       return;
     }
 
@@ -966,13 +971,13 @@
     var failed = 0;
     var seen = {};
 
-    setStatus('鎵归噺鐐归€変腑...');
-    toast('寮€濮嬫壒閲忕偣閫夛紝璇峰嬁鎿嶄綔椤甸潰');
+    setStatus('批量点选中...');
+    toast('开始批量点选，请勿操作页面');
 
     try {
       for (var i = 0; i < CFG.maxSteps; i++) {
         if (state.stopRequested) {
-          toast('宸叉墜鍔ㄥ仠姝?);
+          toast('已手动停止');
           break;
         }
 
@@ -980,12 +985,12 @@
 
         if (!cur) {
           failed++;
-          toast('鏈瘑鍒綋鍓嶉锛屽仠姝?, true);
+          toast('未识别当前题，停止', true);
           break;
         }
 
         if (seen[cur.key]) {
-          toast('妫€娴嬪埌閲嶅棰樼洰锛屽仠姝?);
+          toast('检测到重复题目，停止');
           break;
         }
 
@@ -996,26 +1001,26 @@
         if (!ans) {
           if (isImportedSkip(cur)) {
             skipped++;
-            console.log('[AE] 褰撳墠棰樹负瀛樼枒/鐣欑┖锛岃烦杩囦笉鐐?', {
+            console.log('[AE] 当前题为存疑/留空，跳过不点:', {
               no: cur.no,
               cur: cur
             });
           } else {
             failed++;
-            console.warn('[AE] 褰撳墠棰樻湭鍖归厤绛旀锛屼篃鏈爣璁拌烦杩?', cur);
+            console.warn('[AE] 当前题未匹配答案，也未标记跳过:', cur);
           }
         } else {
           var letters = answerToLetters(ans, cur);
 
           if (!letters.length) {
             failed++;
-            console.warn('[AE] 绛旀鏃犳硶杞€夐」:', ans, cur);
+            console.warn('[AE] 答案无法转选项:', ans, cur);
           } else {
             var ret = applyAnswerToPage(cur, letters, true);
 
             if (ret.ok) {
               selected++;
-              console.log('[AE] 宸茬偣閫?', {
+              console.log('[AE] 已点选:', {
                 no: cur.no,
                 answer: ans,
                 letters: letters,
@@ -1023,7 +1028,7 @@
               });
             } else {
               failed++;
-              console.warn('[AE] 鐐归€夊け璐?', {
+              console.warn('[AE] 点选失败:', {
                 no: cur.no,
                 answer: ans,
                 letters: letters,
@@ -1034,12 +1039,12 @@
           }
         }
 
-        setStatus('鎵归噺鐐归€夛細鎴愬姛 ' + selected + '锛岃烦杩?' + skipped + '锛屽け璐?' + failed);
+        setStatus('批量点选：成功 ' + selected + '，跳过 ' + skipped + '，失败 ' + failed);
 
         var next = q(CFG.nextBtn);
 
         if (!canClickNext(next)) {
-          toast('涓嬩竴棰樹笉鍙偣鍑伙紝鎵归噺鐐归€夌粨鏉?);
+          toast('下一题不可点击，批量点选结束');
           break;
         }
 
@@ -1047,22 +1052,22 @@
         await sleep(CFG.stepDelay);
       }
 
-      setStatus('鎵归噺鐐归€夊畬鎴愶細鎴愬姛 ' + selected + '锛岃烦杩?' + skipped + '锛屽け璐?' + failed);
-      toast('鎵归噺鐐归€夊畬鎴愶細鎴愬姛 ' + selected + '锛岃烦杩?' + skipped + '锛屽け璐?' + failed);
+      setStatus('批量点选完成：成功 ' + selected + '，跳过 ' + skipped + '，失败 ' + failed);
+      toast('批量点选完成：成功 ' + selected + '，跳过 ' + skipped + '，失败 ' + failed);
     } catch (e) {
-      console.error('[AE] 鎵归噺鐐归€夊け璐?', e);
-      toast('鎵归噺鐐归€夊け璐ワ細' + e.message, true);
-      setStatus('鎵归噺鐐归€夊け璐?);
+      console.error('[AE] 批量点选失败:', e);
+      toast('批量点选失败：' + e.message, true);
+      setStatus('批量点选失败');
     } finally {
       state.running = false;
       state.stopRequested = false;
     }
   }
 
-  // ===== 鑷姩閲囬泦 =====
+  // ===== 自动采集 =====
   async function collectAll() {
     if (state.running) {
-      toast('姝ｅ湪閲囬泦涓紝璇峰嬁閲嶅鐐瑰嚮');
+      toast('正在采集中，请勿重复点击');
       return;
     }
 
@@ -1071,25 +1076,25 @@
     state.rows = [];
     state.seen = {};
 
-    setStatus('閲囬泦涓?..');
-    toast('寮€濮嬮噰闆?);
+    setStatus('采集中...');
+    toast('开始采集');
 
     try {
       for (var i = 0; i < CFG.maxSteps; i++) {
         if (state.stopRequested) {
-          toast('宸插仠姝?);
+          toast('已停止');
           break;
         }
 
         var cur = getCurrentQuestion();
 
         if (!cur) {
-          toast('鏈瘑鍒埌褰撳墠棰樼洰锛屽仠姝?, true);
+          toast('未识别到当前题目，停止', true);
           break;
         }
 
         if (state.seen[cur.key]) {
-          toast('妫€娴嬪埌閲嶅棰樼洰锛屽仠姝?);
+          toast('检测到重复题目，停止');
           break;
         }
 
@@ -1105,13 +1110,13 @@
           source: cur.source
         });
 
-        setStatus('宸查噰闆嗭細' + state.rows.length + ' 棰橈紝鏉ユ簮锛? + cur.source);
-        toast('宸查噰闆?' + state.rows.length + ' 棰?);
+        setStatus('已采集：' + state.rows.length + ' 题，来源：' + cur.source);
+        toast('已采集 ' + state.rows.length + ' 题');
 
         var next = q(CFG.nextBtn);
 
         if (!canClickNext(next)) {
-          toast('涓嬩竴棰樹笉鍙偣鍑伙紝鍋滄');
+          toast('下一题不可点击，停止');
           break;
         }
 
@@ -1119,14 +1124,14 @@
         await sleep(CFG.stepDelay);
       }
 
-      setStatus('瀹屾垚锛屽叡 ' + state.rows.length + ' 棰?);
-      toast('閲囬泦瀹屾垚锛屽叡 ' + state.rows.length + ' 棰?);
+      setStatus('完成，共 ' + state.rows.length + ' 题');
+      toast('采集完成，共 ' + state.rows.length + ' 题');
 
       console.log('[AE] rows:', state.rows);
     } catch (e) {
       console.error('[AE] collect error:', e);
-      toast('閲囬泦澶辫触锛? + e.message, true);
-      setStatus('閲囬泦澶辫触');
+      toast('采集失败：' + e.message, true);
+      setStatus('采集失败');
     } finally {
       state.running = false;
       state.stopRequested = false;
@@ -1155,7 +1160,7 @@
 
   function exportJSON() {
     if (!state.rows.length) {
-      toast('鏆傛棤鏁版嵁鍙鍑?, true);
+      toast('暂无数据可导出', true);
       return;
     }
 
@@ -1168,7 +1173,7 @@
 
   function exportCSV() {
     if (!state.rows.length) {
-      toast('鏆傛棤鏁版嵁鍙鍑?, true);
+      toast('暂无数据可导出', true);
       return;
     }
 
@@ -1205,7 +1210,7 @@
 
   async function copyText() {
     if (!state.rows.length) {
-      toast('鏆傛棤鏁版嵁鍙鍒?, true);
+      toast('暂无数据可复制', true);
       return;
     }
 
@@ -1218,20 +1223,20 @@
 
       return String(r.no || '') + '. ' + String(r.stem || '') +
         '\n' + opts +
-        '\n绛旀: ' + (r.answer || '(鏃?') +
-        '\n鏉ユ簮: ' + (r.source || '');
+        '\n答案: ' + (r.answer || '(无)') +
+        '\n来源: ' + (r.source || '');
     }).join('\n\n');
 
     try {
       await navigator.clipboard.writeText(s);
-      toast('宸插鍒讹紝瀛楃鏁帮細' + s.length);
+      toast('已复制，字符数：' + s.length);
     } catch (e) {
       console.error('[AE] copy error:', e);
-      toast('澶嶅埗澶辫触锛? + e.message, true);
+      toast('复制失败：' + e.message, true);
     }
   }
 
-  // ===== 闈㈡澘 =====
+  // ===== 面板 =====
   function injectPanel() {
     var old = document.getElementById('__ae_panel__');
 
@@ -1250,38 +1255,38 @@
 
     p.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
-        '<div style="font-weight:700;font-size:13px;">鏁村嵎閲囬泦瀵煎嚭</div>' +
-        '<button id="__ae_close__" style="border:none;background:#eee;border-radius:4px;cursor:pointer;">脳</button>' +
+        '<div style="font-weight:700;font-size:13px;">整卷采集导出</div>' +
+        '<button id="__ae_close__" style="border:none;background:#eee;border-radius:4px;cursor:pointer;">×</button>' +
       '</div>' +
 
-      '<div id="__ae_status__" style="margin-bottom:8px;color:#666;">寰呭紑濮?/div>' +
+      '<div id="__ae_status__" style="margin-bottom:8px;color:#666;">待开始</div>' +
 
-      '<button id="__ae_start__" style="width:100%;margin:4px 0;cursor:pointer;">寮€濮嬭嚜鍔ㄩ噰闆?/button>' +
-      '<button id="__ae_stop__" style="width:100%;margin:4px 0;cursor:pointer;">鍋滄閲囬泦/鎵归噺</button>' +
-
-      '<hr style="border:none;border-top:1px solid #eee;margin:8px 0;">' +
-
-      '<button id="__ae_json__" style="width:100%;margin:4px 0;cursor:pointer;">瀵煎嚭 JSON</button>' +
-      '<button id="__ae_csv__" style="width:100%;margin:4px 0;cursor:pointer;">瀵煎嚭 CSV</button>' +
-      '<button id="__ae_copy__" style="width:100%;margin:4px 0;cursor:pointer;">澶嶅埗鏂囨湰</button>' +
-      '<button id="__ae_clear__" style="width:100%;margin:4px 0;cursor:pointer;">娓呯┖鏁版嵁</button>' +
+      '<button id="__ae_start__" style="width:100%;margin:4px 0;cursor:pointer;">开始自动采集</button>' +
+      '<button id="__ae_stop__" style="width:100%;margin:4px 0;cursor:pointer;">停止采集/批量</button>' +
 
       '<hr style="border:none;border-top:1px solid #eee;margin:8px 0;">' +
 
-      '<button id="__ae_import_answer__" style="width:100%;margin:4px 0;cursor:pointer;">瀵煎叆绛旀 TXT/JSON</button>' +
-      '<button id="__ae_mark_answer__" style="width:100%;margin:4px 0;cursor:pointer;">鏍囪/鐐归€夊綋鍓嶉</button>' +
-      '<button id="__ae_batch_select__" style="width:100%;margin:4px 0;cursor:pointer;background:#fff3e0;border:1px solid #ff9800;">鎵归噺鐐归€夊叏閮?/button>' +
+      '<button id="__ae_json__" style="width:100%;margin:4px 0;cursor:pointer;">导出 JSON</button>' +
+      '<button id="__ae_csv__" style="width:100%;margin:4px 0;cursor:pointer;">导出 CSV</button>' +
+      '<button id="__ae_copy__" style="width:100%;margin:4px 0;cursor:pointer;">复制文本</button>' +
+      '<button id="__ae_clear__" style="width:100%;margin:4px 0;cursor:pointer;">清空数据</button>' +
+
+      '<hr style="border:none;border-top:1px solid #eee;margin:8px 0;">' +
+
+      '<button id="__ae_import_answer__" style="width:100%;margin:4px 0;cursor:pointer;">导入答案 TXT/JSON</button>' +
+      '<button id="__ae_mark_answer__" style="width:100%;margin:4px 0;cursor:pointer;">标记/点选当前题</button>' +
+      '<button id="__ae_batch_select__" style="width:100%;margin:4px 0;cursor:pointer;background:#fff3e0;border:1px solid #ff9800;">批量点选全部</button>' +
 
       '<label style="display:flex;align-items:center;gap:4px;margin-top:6px;color:#666;cursor:pointer;">' +
         '<input id="__ae_autoselect__" type="checkbox">' +
-        '<span>鑷姩鐐归€夊綋鍓嶉</span>' +
+        '<span>自动点选当前题</span>' +
       '</label>' +
 
       '<div style="margin-top:8px;color:#999;line-height:1.4;">' +
-        'TXT鏍煎紡锛? C / 2 ABCD / 3 姝ｇ‘銆?br>' +
-        '4 瀛樼枒 鎴栧崟鐙?4锛氬彧璺宠繃锛屼笉鐐瑰瓨鐤戙€?br>' +
-        '鎵归噺鐐归€変細浠庡綋鍓嶉寮€濮嬪線鍚庢墽琛屻€?br>' +
-        '瑕侀€夊叏鍗凤紝璇峰厛鍥炲埌绗?棰樸€? +
+        'TXT格式：1 C / 2 ABCD / 3 正确。<br>' +
+        '4 存疑 或单独 4：只跳过，不点存疑。<br>' +
+        '批量点选会从当前题开始往后执行。<br>' +
+        '要选全卷，请先回到第1题。' +
       '</div>';
 
     document.body.appendChild(p);
@@ -1290,7 +1295,7 @@
 
     q('#__ae_stop__').onclick = function () {
       state.stopRequested = true;
-      toast('姝ｅ湪鍋滄...');
+      toast('正在停止...');
     };
 
     q('#__ae_json__').onclick = exportJSON;
@@ -1299,14 +1304,14 @@
 
     q('#__ae_clear__').onclick = function () {
       if (state.running) {
-        toast('杩愯涓紝鏃犳硶娓呯┖', true);
+        toast('运行中，无法清空', true);
         return;
       }
 
       state.rows = [];
       state.seen = {};
-      setStatus('宸叉竻绌?);
-      toast('鏁版嵁宸叉竻绌?);
+      setStatus('已清空');
+      toast('数据已清空');
     };
 
     q('#__ae_import_answer__').onclick = importAnswerFile;
@@ -1315,7 +1320,7 @@
 
     q('#__ae_autoselect__').onchange = function () {
       ANSWER_IMPORT.autoSelect = this.checked;
-      toast(this.checked ? '宸插紑鍚嚜鍔ㄧ偣閫夊綋鍓嶉' : '宸插叧闂嚜鍔ㄧ偣閫夛紝浠呴珮浜?);
+      toast(this.checked ? '已开启自动点选当前题' : '已关闭自动点选，仅高亮');
     };
 
     q('#__ae_close__').onclick = function () {
@@ -1361,7 +1366,7 @@
     };
 
     console.log('[AE] panel injected');
-    toast('閲囬泦闈㈡澘宸插姞杞?);
+    toast('采集面板已加载');
   }
 
   function boot() {
@@ -1377,7 +1382,7 @@
           init();
         } catch (e) {
           console.error('[AE] init error:', e);
-          alert('AE鑴氭湰鍒濆鍖栧け璐ワ細' + e.message);
+          alert('AE脚本初始化失败：' + e.message);
         }
 
         return;
