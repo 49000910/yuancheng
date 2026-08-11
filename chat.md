@@ -1,7 +1,6 @@
 # Chat Hub
 
 ## Question (from local)
-What is the highest mountain in the world? Please answer in Chinese.
+世界最高峰是什么？请用中文回答。
 
 ## Answer (fill here)
-灌灌灌灌灌灌灌灌灌
