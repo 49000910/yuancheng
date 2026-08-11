@@ -1,6 +1,6 @@
-# Chat Hub - Local -> GitHub -> GPT
+# Chat Hub
 
-## Question
-What is the capital of France?
+## Question (from local)
+What is the highest mountain in the world? Please answer in Chinese.
 
-## Answer
+## Answer (fill here)
