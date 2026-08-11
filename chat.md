@@ -1,6 +1,6 @@
-# Chat中转站 - 内网 ↔ 外网
+# Chat Hub - Local -> GitHub -> GPT
 
-## 我的问题（新问题）
-请用中文回答：世界最高峰是什么？
+## Question
+What is the capital of France?
 
-## GPT-5回复（请在此填写）
+## Answer
